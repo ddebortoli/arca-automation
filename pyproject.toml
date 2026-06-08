@@ -1,0 +1,23 @@
+[project]
+name = "arca-automation"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "cryptography>=44.0.0",
+    "httpx>=0.27.0",
+    "lxml>=5.0.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "zeep>=4.3.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
