@@ -18,7 +18,7 @@ from .use_cases.reject_payment import RejectPaymentUseCase
 def load_runtime_config() -> dict[str, str]:
     """Load required environment variables for the single-tenant deployment."""
     load_dotenv()
-    required = ("MP_ACCESS_TOKEN", "MP_USER_ID", "AFIP_CUIT")
+    required = ("MP_ACCESS_TOKEN", "MP_USER_ID", "AFIP_CUIT", "AFIP_CERT_PATH", "AFIP_KEY_PATH")
     missing = [key for key in required if not os.getenv(key)]
     if missing:
         raise EnvironmentError(f"Missing required environment variables: {', '.join(missing)}")
