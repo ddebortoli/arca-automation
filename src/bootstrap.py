@@ -48,8 +48,8 @@ def build_mercadopago_provider(config: dict[str, str]) -> MercadoPagoPort:
 
 def build_afip_provider(config: dict[str, str]) -> AfipPort:
     afip_auth = AfipAuthProvider(
-        cert_path="certs/afip_python_5cd623bfe1ea63f2.crt",
-        key_path="certs/private.key",
+        cert_path=config["AFIP_CERT_PATH"],
+        key_path=config["AFIP_KEY_PATH"],
         cuit=int(config["AFIP_CUIT"]),
     )
     return AfipElectronicBillingProvider(auth=afip_auth)
