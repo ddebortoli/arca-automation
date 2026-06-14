@@ -3,11 +3,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from .domain.config import ApprovalConfig
+from .domain.config import ApprovalConfig, ObservabilityConfig
 from .domain.ports import AfipPort, ApprovalPort, MercadoPagoPort
 from .providers.afip import AfipAuthProvider, AfipElectronicBillingProvider
 from .providers.approval import build_approval_provider
 from .providers.mercadopago import HttpMercadoPagoProvider
+from .providers.observability import build_observability_backend
 from .repositories.payment_repository import PaymentRepository
 from .use_cases.issue_invoice import IssueInvoiceUseCase
 from .use_cases.process_payments import ProcessPaymentsUseCase
@@ -37,6 +38,35 @@ def load_approval_config() -> ApprovalConfig:
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN"),
         telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID"),
     )
+
+
+def load_observability_config() -> ObservabilityConfig:
+    """Load observability settings from environment variables."""
+    load_dotenv()
+    backend = os.getenv("OBSERVABILITY_BACKEND", "stdio")
+    if backend not in {"stdio", "logfire", "sentry"}:
+        raise EnvironmentError(
+            "OBSERVABILITY_BACKEND must be 'stdio', 'logfire', or 'sentry'"
+        )
+
+    log_level = os.getenv("LOG_LEVEL", "INFO")
+    if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
+        raise EnvironmentError("LOG_LEVEL must be DEBUG, INFO, WARNING, or ERROR")
+
+    return ObservabilityConfig(
+        backend=backend,  # type: ignore[arg-type]
+        service_name=os.getenv("SERVICE_NAME", "arca-automation"),
+        log_level=log_level,  # type: ignore[arg-type]
+        logfire_token=os.getenv("LOGFIRE_TOKEN"),
+        sentry_dsn=os.getenv("SENTRY_DSN"),
+    )
+
+
+def configure_observability(config: ObservabilityConfig | None = None) -> None:
+    """Configure logging for the current process."""
+    if config is None:
+        config = load_observability_config()
+    build_observability_backend(config).configure()
 
 
 def build_mercadopago_provider(config: dict[str, str]) -> MercadoPagoPort:

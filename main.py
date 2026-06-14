@@ -15,30 +15,25 @@ from src.bootstrap import (
     build_mercadopago_provider,
     build_process_payments_use_case,
     build_repository,
+    configure_observability,
     load_approval_config,
     load_runtime_config,
 )
 from src.providers.approval import build_approval_provider
 
-_LOG_FORMAT = "%(asctime)s %(levelname)-8s %(name)s — %(message)s"
 _DB_PATH = Path(__file__).parent / "payments.db"
 _LOGS_DIR = Path(__file__).parent / "logs"
 
 
-def _configure_logging() -> None:
-    _LOGS_DIR.mkdir(exist_ok=True)
-    logging.basicConfig(
-        level=logging.INFO,
-        format=_LOG_FORMAT,
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-        ],
-    )
-
-
 def main() -> None:
     """Bootstrap all dependencies and run the payment processing pipeline."""
-    _configure_logging()
+    _LOGS_DIR.mkdir(exist_ok=True)
+    try:
+        configure_observability()
+    except (EnvironmentError, ValueError, ImportError) as exc:
+        print(f"Observability setup failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+
     logger = logging.getLogger(__name__)
 
     try:

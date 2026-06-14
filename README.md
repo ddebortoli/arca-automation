@@ -215,6 +215,52 @@ uv run main.py
 0 2 * * * cd /path/to/arca-automation && uv run main.py >> logs/cron.log 2>&1
 ```
 
+## Observability
+
+Logging uses Python's stdlib `logging` throughout. The backend is chosen once at startup via `OBSERVABILITY_BACKEND` — no code changes needed to switch providers.
+
+| Backend | Config | Install |
+|---|---|---|
+| `stdio` (default) | No extra vars | `uv sync` |
+| `logfire` | `LOGFIRE_TOKEN` | `uv sync --extra logfire` |
+| `sentry` | `SENTRY_DSN` | `uv sync --extra sentry` |
+
+### Examples
+
+**Logfire:**
+
+```env
+OBSERVABILITY_BACKEND=logfire
+LOGFIRE_TOKEN=your-write-token
+SERVICE_NAME=arca-automation
+```
+
+**Stdout only (no external provider):**
+
+```env
+OBSERVABILITY_BACKEND=stdio
+```
+
+Or omit `OBSERVABILITY_BACKEND` entirely — stdout is the default.
+
+**Sentry:**
+
+```env
+OBSERVABILITY_BACKEND=sentry
+SENTRY_DSN=https://xxx@xxx.ingest.sentry.io/xxx
+```
+
+Both `main.py` and `telegram_bot.py` call `configure_observability()` at startup.
+
+## Payment statuses
+
+| Status | Meaning |
+|---|---|
+| `fetched` | New from MP, awaiting processing |
+| `pending_approval` | Telegram message sent |
+| `issued` | Invoiced with CAE |
+| `failed` | AFIP error (retries) |
+| `rejected` | User rejected (terminal) |
 For Telegram mode, run `telegram_bot.py` as a systemd service (or similar) so it stays alive between syncs.
 
 ## Workflows
