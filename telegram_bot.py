@@ -16,6 +16,7 @@ from src.bootstrap import (
     build_postpone_payment_use_case,
     build_reject_payment_use_case,
     build_repository,
+    configure_observability,
     load_approval_config,
     load_runtime_config,
 )
@@ -34,18 +35,9 @@ from src.providers.approval.telegram import (
 )
 from src.repositories.payment_repository import PaymentRepository
 
-_LOG_FORMAT = "%(asctime)s %(levelname)-8s %(name)s — %(message)s"
 _DB_PATH = Path(__file__).parent / "payments.db"
 _TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
 _POLL_TIMEOUT_SECONDS = 30
-
-
-def _configure_logging() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format=_LOG_FORMAT,
-        handlers=[logging.StreamHandler(sys.stdout)],
-    )
 
 
 class TelegramApprovalBot:
@@ -233,7 +225,12 @@ def _parse_callback_data(data: str) -> tuple[str, int]:
 
 
 def main() -> None:
-    _configure_logging()
+    try:
+        configure_observability()
+    except (EnvironmentError, ValueError, ImportError) as exc:
+        print(f"Observability setup failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+
     logger = logging.getLogger(__name__)
 
     try:
