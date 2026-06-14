@@ -1,4 +1,13 @@
-from ...domain.config import ObservabilityConfig
+import logging
+
+from ...domain.config import LogLevel, ObservabilityConfig
+
+_LEVELS: dict[LogLevel, int] = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+}
 
 
 class LogfireObservabilityBackend:
@@ -19,3 +28,11 @@ class LogfireObservabilityBackend:
             token=self._config.logfire_token,
             service_name=self._config.service_name,
         )
+
+        root = logging.getLogger()
+        root.handlers.clear()
+        root.setLevel(_LEVELS[self._config.log_level])
+
+        handler = logfire.LogfireLoggingHandler()
+        handler.setLevel(_LEVELS[self._config.log_level])
+        root.addHandler(handler)

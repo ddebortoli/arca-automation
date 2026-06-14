@@ -48,6 +48,14 @@ def test_logfire_backend_calls_configure() -> None:
         service_name="test-service",
     )
     mock_logfire = MagicMock()
+    mock_handler = MagicMock()
+    mock_handler.level = logging.NOTSET
+
+    def _set_level(level: int) -> None:
+        mock_handler.level = level
+
+    mock_handler.setLevel.side_effect = _set_level
+    mock_logfire.LogfireLoggingHandler.return_value = mock_handler
 
     with patch.dict("sys.modules", {"logfire": mock_logfire}):
         import sys
@@ -59,6 +67,10 @@ def test_logfire_backend_calls_configure() -> None:
         token="test-token",
         service_name="test-service",
     )
+    assert mock_logfire.LogfireLoggingHandler.called
+
+    # Avoid leaking log handlers into subsequent tests.
+    logging.getLogger().handlers.clear()
 
 
 def test_logfire_backend_raises_when_not_installed() -> None:
