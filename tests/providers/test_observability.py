@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.bootstrap import _TelegramApiLogFilter, _redact_telegram_bot_token
 from src.domain.config import ObservabilityConfig
 from src.providers.observability import build_observability_backend
 from src.providers.observability.stdio import StdioObservabilityBackend
@@ -58,8 +59,6 @@ def test_logfire_backend_calls_configure() -> None:
     mock_logfire.LogfireLoggingHandler.return_value = mock_handler
 
     with patch.dict("sys.modules", {"logfire": mock_logfire}):
-        import sys
-
         backend = build_observability_backend(config)
         backend.configure()
 
@@ -109,3 +108,52 @@ def test_sentry_backend_calls_init() -> None:
     call_kwargs = mock_sentry.init.call_args.kwargs
     assert call_kwargs["dsn"] == "https://example@sentry.io/1"
     assert call_kwargs["environment"] == "test-service"
+
+
+def test_redact_telegram_bot_token_redacts_any_endpoint() -> None:
+    message = (
+        'HTTP Request: POST https://api.telegram.org/bot123456:abcDEF/sendMessage '
+        '"HTTP/1.1 200 OK"'
+    )
+    redacted = _redact_telegram_bot_token(message)
+    assert "abcDEF" not in redacted
+    assert "bot123456:<redacted>/sendMessage" in redacted
+
+
+def test_telegram_api_filter_redacts_and_keeps_non_polling_logs() -> None:
+    record = logging.LogRecord(
+        name="httpx",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg=(
+            'HTTP Request: POST https://api.telegram.org/bot123456:abcDEF/sendMessage '
+            '"HTTP/1.1 200 OK"'
+        ),
+        args=(),
+        exc_info=None,
+    )
+
+    allow = _TelegramApiLogFilter().filter(record)
+    assert allow is True
+    assert "abcDEF" not in record.getMessage()
+    assert "bot123456:<redacted>/sendMessage" in record.getMessage()
+
+
+def test_telegram_api_filter_drops_successful_get_updates() -> None:
+    record = logging.LogRecord(
+        name="httpx",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg=(
+            'HTTP Request: GET https://api.telegram.org/bot123456:abcDEF/getUpdates '
+            '"HTTP/1.1 200 OK"'
+        ),
+        args=(),
+        exc_info=None,
+    )
+
+    allow = _TelegramApiLogFilter().filter(record)
+    assert allow is False
+    assert "abcDEF" not in record.getMessage()
