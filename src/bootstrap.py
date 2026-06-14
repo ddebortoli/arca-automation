@@ -1,4 +1,6 @@
+import logging
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -14,6 +16,35 @@ from .use_cases.issue_invoice import IssueInvoiceUseCase
 from .use_cases.process_payments import ProcessPaymentsUseCase
 from .use_cases.postpone_payment import PostponePaymentUseCase
 from .use_cases.reject_payment import RejectPaymentUseCase
+
+_TELEGRAM_BOT_URL_PATTERN = re.compile(r"(api\.telegram\.org/bot)([^/\s\"']+)(/)")
+
+
+def _redact_telegram_bot_token(message: str) -> str:
+    """Redact Telegram bot token secrets in any Bot API URL."""
+
+    def _replace(match: re.Match[str]) -> str:
+        token = match.group(2)
+        token_id, _, _token_secret = token.partition(":")
+        replacement = f"{token_id}:<redacted>" if token_id else "<redacted>"
+        return f"{match.group(1)}{replacement}{match.group(3)}"
+
+    return _TELEGRAM_BOT_URL_PATTERN.sub(_replace, message)
+
+
+class _TelegramApiLogFilter(logging.Filter):
+    """Redact Telegram tokens and drop repetitive successful polling logs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        if "api.telegram.org/bot" not in message:
+            return True
+
+        redacted_message = _redact_telegram_bot_token(message)
+        record.msg = redacted_message
+        record.args = ()
+
+        return not ("/getUpdates" in redacted_message and "200 OK" in redacted_message)
 
 
 def load_runtime_config() -> dict[str, str]:
@@ -67,6 +98,12 @@ def configure_observability(config: ObservabilityConfig | None = None) -> None:
     if config is None:
         config = load_observability_config()
     build_observability_backend(config).configure()
+
+    root = logging.getLogger()
+    filter_instance = _TelegramApiLogFilter()
+    for handler in root.handlers:
+        if not any(isinstance(existing, _TelegramApiLogFilter) for existing in handler.filters):
+            handler.addFilter(filter_instance)
 
 
 def build_mercadopago_provider(config: dict[str, str]) -> MercadoPagoPort:
