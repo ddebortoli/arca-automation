@@ -13,3 +13,13 @@ class AutoApprovalProvider:
         preview: InvoicePreview,
     ) -> None:
         raise RuntimeError("AutoApprovalProvider does not submit for approval")
+
+    def notify_afip_validation(
+        self,
+        payment: MercadoPagoPayment,
+        *,
+        errors: list[str],
+        events: list[str],
+    ) -> None:
+        # No interactive user to notify in auto mode.
+        return

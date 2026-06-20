@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from ..domain.exceptions import ApprovalError
+from ..domain.exceptions import AfipInvoiceError, AfipValidationError, ApprovalError
 from ..domain.models import MercadoPagoPayment
 from ..domain.ports import AfipPort, ApprovalPort, MercadoPagoPort
 from ..repositories.payment_repository import PaymentRepository
@@ -66,8 +66,64 @@ class ProcessPaymentsUseCase:
     def _submit_for_approval(self, payments: list[MercadoPagoPayment]) -> None:
         submitted = 0
         for payment in payments:
-            preview = self._afip.build_invoice_preview(payment)
+            validation_errors: list[str] = []
+            validation_events: list[str] = []
+
+            validate_fn = getattr(self._afip, "validate_configuration", None)
+            if callable(validate_fn):
+                try:
+                    result = validate_fn()
+                    if isinstance(result, tuple) and len(result) == 2:
+                        validation_errors, validation_events = result
+                    else:
+                        validation_errors, validation_events = [], []
+                except AfipValidationError as exc:
+                    validation_errors = [str(exc)]
+                    self._repo.mark_postponed(payment.id, str(exc))
+                    logger.error(
+                        "Payment %d — AFIP validation failed, posponiendo: %s",
+                        payment.id,
+                        exc,
+                    )
+                    self._approval.notify_afip_validation(
+                        payment,
+                        errors=validation_errors,
+                        events=[],
+                    )
+                    continue
+
             try:
+                preview = self._afip.build_invoice_preview(payment)
+            except AfipInvoiceError as exc:
+                validation_errors = [str(exc)]
+                self._repo.mark_postponed(payment.id, str(exc))
+                logger.error(
+                    "Payment %d — AFIP WSFE validation failed, posponiendo: %s",
+                    payment.id,
+                    exc,
+                )
+                self._approval.notify_afip_validation(
+                    payment,
+                    errors=validation_errors,
+                    events=[],
+                )
+                continue
+
+            try:
+                if validation_events:
+                    # Notify AFIP warnings before asking the user.
+                    try:
+                        self._approval.notify_afip_validation(
+                            payment,
+                            errors=[],
+                            events=validation_events,
+                        )
+                    except ApprovalError as exc:
+                        logger.error(
+                            "Payment %d — Telegram AFIP warning notice failed: %s",
+                            payment.id,
+                            exc,
+                        )
                 self._approval.submit_for_approval(payment, preview)
             except ApprovalError as exc:
                 logger.error(

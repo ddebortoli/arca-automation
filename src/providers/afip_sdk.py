@@ -6,17 +6,9 @@ from afip import Afip
 
 from ..domain.exceptions import AfipInvoiceError
 from ..domain.models import IssuedInvoice
+from .afip.wsfe_settings import load_wsfe_settings
 
 logger = logging.getLogger(__name__)
-
-_PUNTO_DE_VENTA = 2
-_TIPO_FACTURA = 11      # Factura C
-_CONCEPTO = 2           # Servicios
-_TIPO_DOCUMENTO = 99    # Consumidor Final
-_NUMERO_DOCUMENTO = 0
-_CONDICION_IVA = 5      # Consumidor Final
-
-
 class AfipElectronicBillingProvider:
     """Issues Factura C invoices through the AFIP WSFE service.
 
@@ -51,13 +43,14 @@ class AfipElectronicBillingProvider:
         fecha = int(date.strftime("%Y%m%d"))
         amount_float = float(amount)
 
+        wsfe = load_wsfe_settings()
         data = {
             "CantReg": 1,
-            "PtoVta": _PUNTO_DE_VENTA,
-            "CbteTipo": _TIPO_FACTURA,
-            "Concepto": _CONCEPTO,
-            "DocTipo": _TIPO_DOCUMENTO,
-            "DocNro": _NUMERO_DOCUMENTO,
+            "PtoVta": wsfe.punto_de_venta,
+            "CbteTipo": wsfe.tipo_factura,
+            "Concepto": wsfe.concepto,
+            "DocTipo": wsfe.doc_tipo,
+            "DocNro": wsfe.doc_nro,
             "CbteDesde": invoice_number,
             "CbteHasta": invoice_number,
             "CbteFch": fecha,
@@ -72,7 +65,7 @@ class AfipElectronicBillingProvider:
             "ImpTrib": 0,
             "MonId": "PES",
             "MonCotiz": 1,
-            "CondicionIVAReceptorId": _CONDICION_IVA,
+            "CondicionIVAReceptorId": wsfe.condicion_iva,
         }
 
         try:
@@ -90,5 +83,6 @@ class AfipElectronicBillingProvider:
         )
 
     def _next_invoice_number(self) -> int:
-        last = self._billing.getLastVoucher(_PUNTO_DE_VENTA, _TIPO_FACTURA)
+        wsfe = load_wsfe_settings()
+        last = self._billing.getLastVoucher(wsfe.punto_de_venta, wsfe.tipo_factura)
         return last + 1

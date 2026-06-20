@@ -6,6 +6,10 @@ class AfipInvoiceError(Exception):
     """Raised when AFIP fails to create a voucher for a given payment."""
 
 
+class AfipValidationError(Exception):
+    """Raised when AFIP endpoints report credential/service configuration issues."""
+
+
 class PaymentNotFoundError(Exception):
     """Raised when a payment ID does not exist in the repository."""
 

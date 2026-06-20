@@ -127,6 +127,21 @@ class PaymentRepository:
                 (error, now, mp_payment_id),
             )
 
+    def mark_postponed(self, mp_payment_id: int, error: str) -> None:
+        """Transition payment to ``fetched`` and store an error for retry.
+
+        This allows reprocessing on the next sync without notifying the user
+        with an invalid invoice preview.
+        """
+        now = _utcnow()
+        with self._connect() as conn:
+            conn.execute(
+                """UPDATE payments
+                   SET status='fetched', error_message=?, updated_at=?
+                   WHERE mp_payment_id=?""",
+                (error, now, mp_payment_id),
+            )
+
     def mark_rejected(self, mp_payment_id: int, reason: str = "Rechazado por usuario") -> None:
         """Transition payment to ``rejected`` (terminal, no retries)."""
         now = _utcnow()

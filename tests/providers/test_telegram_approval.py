@@ -43,6 +43,7 @@ def test_format_message_includes_voucher_details() -> None:
     assert "Pago MP: #42" in message
     assert "701.503,20" in message
     assert "Factura C 00002-00000004" in message
+    assert "Punto de venta: 00002" in message
     assert "Consumidor Final" in message
 
 
@@ -63,6 +64,7 @@ def test_format_postponed_message_includes_invoice_details() -> None:
     assert "⏸ Factura pospuesta" in message
     assert "Pago MP: #42" in message
     assert "Factura C 00002-00000004" in message
+    assert "Punto de venta: 00002" in message
     assert "próximo sync" in message
 
 

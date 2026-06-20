@@ -64,6 +64,47 @@ class TelegramApprovalProvider:
 
         logger.info("Approval request sent to Telegram for payment %d", payment.id)
 
+    def notify_afip_validation(
+        self,
+        payment: MercadoPagoPayment,
+        *,
+        errors: list[str],
+        events: list[str],
+    ) -> None:
+        """Send an AFIP validation notice to Telegram.
+
+        Used to avoid confusion when AFIP reports errors (fatal) or events
+        (warnings) during configuration/WS calls.
+        """
+        lines: list[str] = []
+        if errors:
+            lines.append(f"❌ AFIP validation errors for payment #{payment.id}")
+            for err in errors:
+                lines.append(f"- {err}")
+        if events:
+            if errors:
+                lines.append("")
+            lines.append(f"⚠️ AFIP validation warnings for payment #{payment.id}")
+            for evt in events:
+                lines.append(f"- {evt}")
+
+        if not lines:
+            return
+
+        message = "\n".join(lines)
+        try:
+            self._api_post(
+                "sendMessage",
+                {
+                    "chat_id": self._chat_id,
+                    "text": message,
+                },
+            )
+        except httpx.HTTPError as exc:
+            raise ApprovalError(
+                f"Failed to send AFIP validation notice for payment {payment.id}: {exc}"
+            ) from exc
+
     def answer_callback(self, callback_query_id: str, text: str) -> None:
         """Acknowledge a button press in Telegram."""
         self._api_post(
@@ -105,6 +146,7 @@ def format_invoice_details(preview: InvoicePreview) -> str:
         f"Pago MP: #{preview.payment_id}\n"
         f"Monto: ${amount} ARS\n"
         f"Fecha servicio: {service_date}\n"
+        f"Punto de venta: {preview.point_of_sale:05d}\n"
         f"Comprobante: {preview.formatted_voucher}\n"
         f"Receptor: {preview.receiver}\n"
         f"Concepto: {preview.concept}"
