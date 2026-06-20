@@ -64,3 +64,18 @@ class ApprovalPort(Protocol):
             ApprovalError: If the approval request cannot be delivered.
         """
         ...
+
+    def notify_afip_validation(
+        self,
+        payment: MercadoPagoPayment,
+        *,
+        errors: list[str],
+        events: list[str],
+    ) -> None:
+        """Send AFIP validation warnings/errors to the user (if applicable).
+
+        This is used to avoid sending an incorrect approval request when AFIP
+        reports credential/service issues; for non-interactive modes it is a
+        no-op.
+        """
+        ...

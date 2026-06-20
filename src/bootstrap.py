@@ -20,6 +20,21 @@ from .use_cases.reject_payment import RejectPaymentUseCase
 _TELEGRAM_BOT_URL_PATTERN = re.compile(r"(api\.telegram\.org/bot)([^/\s\"']+)(/)")
 
 
+def _load_env() -> None:
+    """Load environment variables from `.env` or from `ARC_ENV_FILE`.
+
+    If `ARC_ENV_FILE` is set, it is loaded with `override=True` so the desktop
+    app's generated file takes precedence over the repo's `.env`.
+    """
+    arc_env_file = os.getenv("ARC_ENV_FILE")
+    if arc_env_file:
+        expanded = str(Path(arc_env_file).expanduser())
+        load_dotenv(dotenv_path=expanded, override=True)
+        return
+
+    load_dotenv()
+
+
 def _redact_telegram_bot_token(message: str) -> str:
     """Redact Telegram bot token secrets in any Bot API URL."""
 
@@ -49,7 +64,7 @@ class _TelegramApiLogFilter(logging.Filter):
 
 def load_runtime_config() -> dict[str, str]:
     """Load required environment variables for the single-tenant deployment."""
-    load_dotenv()
+    _load_env()
     required = ("MP_ACCESS_TOKEN", "MP_USER_ID", "AFIP_CUIT", "AFIP_CERT_PATH", "AFIP_KEY_PATH")
     missing = [key for key in required if not os.getenv(key)]
     if missing:
@@ -73,7 +88,7 @@ def load_approval_config() -> ApprovalConfig:
 
 def load_observability_config() -> ObservabilityConfig:
     """Load observability settings from environment variables."""
-    load_dotenv()
+    _load_env()
     backend = os.getenv("OBSERVABILITY_BACKEND", "stdio")
     if backend not in {"stdio", "logfire", "sentry"}:
         raise EnvironmentError(
