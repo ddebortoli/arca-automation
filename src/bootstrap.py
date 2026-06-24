@@ -1,3 +1,5 @@
+"""Bootstrap wiring and database factory helpers."""
+
 import logging
 import os
 import re
@@ -6,12 +8,14 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .domain.config import ApprovalConfig, ObservabilityConfig
-from .domain.ports import AfipPort, ApprovalPort, MercadoPagoPort
+from .domain.ports import AfipPort, ApprovalPort, MercadoPagoPort, PaymentRepositoryPort
+from .paths import get_default_sqlite_path, resolve_sqlite_path
 from .providers.afip import AfipAuthProvider, AfipElectronicBillingProvider
 from .providers.approval import build_approval_provider
 from .providers.mercadopago import HttpMercadoPagoProvider
 from .providers.observability import build_observability_backend
-from .repositories.payment_repository import PaymentRepository
+from .repositories.postgres_payment_repository import PostgresPaymentRepository
+from .repositories.sqlite_payment_repository import SqlitePaymentRepository
 from .use_cases.issue_invoice import IssueInvoiceUseCase
 from .use_cases.process_payments import ProcessPaymentsUseCase
 from .use_cases.postpone_payment import PostponePaymentUseCase
@@ -65,7 +69,13 @@ class _TelegramApiLogFilter(logging.Filter):
 def load_runtime_config() -> dict[str, str]:
     """Load required environment variables for the single-tenant deployment."""
     _load_env()
-    required = ("MP_ACCESS_TOKEN", "MP_USER_ID", "AFIP_CUIT", "AFIP_CERT_PATH", "AFIP_KEY_PATH")
+    required = (
+        "MP_ACCESS_TOKEN",
+        "MP_USER_ID",
+        "AFIP_CUIT",
+        "AFIP_CERT_PATH",
+        "AFIP_KEY_PATH",
+    )
     missing = [key for key in required if not os.getenv(key)]
     if missing:
         raise EnvironmentError(f"Missing required environment variables: {', '.join(missing)}")
@@ -91,9 +101,7 @@ def load_observability_config() -> ObservabilityConfig:
     _load_env()
     backend = os.getenv("OBSERVABILITY_BACKEND", "stdio")
     if backend not in {"stdio", "logfire", "sentry"}:
-        raise EnvironmentError(
-            "OBSERVABILITY_BACKEND must be 'stdio', 'logfire', or 'sentry'"
-        )
+        raise EnvironmentError("OBSERVABILITY_BACKEND must be 'stdio', 'logfire', or 'sentry'")
 
     log_level = os.getenv("LOG_LEVEL", "INFO")
     if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
@@ -112,9 +120,18 @@ def configure_observability(config: ObservabilityConfig | None = None) -> None:
     """Configure logging for the current process."""
     if config is None:
         config = load_observability_config()
-    build_observability_backend(config).configure()
 
     root = logging.getLogger()
+    preserved_handlers = [
+        handler for handler in root.handlers if getattr(handler, "preserve_on_reconfigure", False)
+    ]
+
+    build_observability_backend(config).configure()
+
+    for handler in preserved_handlers:
+        if handler not in root.handlers:
+            root.addHandler(handler)
+
     filter_instance = _TelegramApiLogFilter()
     for handler in root.handlers:
         if not any(isinstance(existing, _TelegramApiLogFilter) for existing in handler.filters):
@@ -137,8 +154,62 @@ def build_afip_provider(config: dict[str, str]) -> AfipPort:
     return AfipElectronicBillingProvider(auth=afip_auth)
 
 
-def build_repository(db_path: Path) -> PaymentRepository:
-    return PaymentRepository(db_path=db_path)
+def build_repository() -> PaymentRepositoryPort:
+    """Build the configured payment repository from environment variables."""
+    _load_env()
+    backend = os.getenv("DATABASE_BACKEND", "sqlite").strip().lower()
+    if backend == "sqlite":
+        db_path = resolve_sqlite_path(os.getenv("DATABASE_PATH"))
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        return SqlitePaymentRepository(db_path)
+
+    if backend == "postgres":
+        database_url = os.getenv("DATABASE_URL", "").strip()
+        if not database_url:
+            raise EnvironmentError("DATABASE_URL is required when DATABASE_BACKEND=postgres")
+        return PostgresPaymentRepository(database_url)
+
+    raise EnvironmentError("DATABASE_BACKEND must be 'sqlite' or 'postgres'")
+
+
+def verify_database_connection(
+    *,
+    backend: str,
+    database_path: str = "",
+    database_url: str = "",
+) -> None:
+    """Validate database connectivity and ensure schema exists.
+
+    Raises:
+        EnvironmentError: If configuration is invalid.
+        Exception: If the connection or schema initialization fails.
+    """
+    normalized = backend.strip().lower()
+    if normalized == "sqlite":
+        path = resolve_sqlite_path(database_path or None)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        SqlitePaymentRepository(path)
+        return
+
+    if normalized == "postgres":
+        url = database_url.strip()
+        if not url:
+            raise EnvironmentError("DATABASE_URL is required for PostgreSQL")
+        PostgresPaymentRepository(url)
+        return
+
+    raise EnvironmentError("DATABASE_BACKEND must be 'sqlite' or 'postgres'")
+
+
+def get_resolved_sqlite_path() -> Path:
+    """Return the SQLite path that would be used with current environment."""
+    _load_env()
+    return resolve_sqlite_path(os.getenv("DATABASE_PATH"))
+
+
+def get_default_sqlite_database_path() -> Path:
+    """Return the default SQLite database path for new installations."""
+    return get_default_sqlite_path()
 
 
 def build_process_payments_use_case(
@@ -146,7 +217,7 @@ def build_process_payments_use_case(
     mp_provider: MercadoPagoPort,
     afip_provider: AfipPort,
     approval_provider: ApprovalPort,
-    repository: PaymentRepository,
+    repository: PaymentRepositoryPort,
 ) -> ProcessPaymentsUseCase:
     return ProcessPaymentsUseCase(
         mp_provider=mp_provider,
@@ -158,18 +229,18 @@ def build_process_payments_use_case(
 
 def build_issue_invoice_use_case(
     afip_provider: AfipPort,
-    repository: PaymentRepository,
+    repository: PaymentRepositoryPort,
 ) -> IssueInvoiceUseCase:
     return IssueInvoiceUseCase(afip_provider, repository)
 
 
 def build_reject_payment_use_case(
-    repository: PaymentRepository,
+    repository: PaymentRepositoryPort,
 ) -> RejectPaymentUseCase:
     return RejectPaymentUseCase(repository)
 
 
 def build_postpone_payment_use_case(
-    repository: PaymentRepository,
+    repository: PaymentRepositoryPort,
 ) -> PostponePaymentUseCase:
     return PostponePaymentUseCase(repository)

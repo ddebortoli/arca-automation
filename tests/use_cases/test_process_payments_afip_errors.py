@@ -64,4 +64,3 @@ def test_afip_errors_skip_approval_and_mark_failed(tmp_path) -> None:
     payment = repo.get_payment(1)
     assert payment is not None
     assert payment.status == "fetched"
-

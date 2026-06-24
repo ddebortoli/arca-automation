@@ -80,9 +80,7 @@ class HttpMercadoPagoProvider:
             )
 
         if response.status_code != 200:
-            raise MercadoPagoError(
-                f"MercadoPago API error {response.status_code}: {response.text}"
-            )
+            raise MercadoPagoError(f"MercadoPago API error {response.status_code}: {response.text}")
 
         results: list[dict] = response.json().get("results", [])
         return self._filter_income_payments(results)

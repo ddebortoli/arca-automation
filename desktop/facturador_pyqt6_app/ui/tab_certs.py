@@ -19,9 +19,22 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from core.config import CERTS_DIR, get_certs_status, import_cert_file, load_config, save_config
+from core.config import (
+    CERTS_DIR,
+    get_certs_status,
+    import_cert_file,
+    load_config,
+    save_config,
+)
 from core.cert_generator import generate_key_and_csr
-from ui.widgets import AlertBanner, CardWidget, make_divider, make_field, make_section_header
+from core.paths import get_docs_dir
+from ui.widgets import (
+    AlertBanner,
+    CardWidget,
+    make_divider,
+    make_field,
+    make_section_header,
+)
 
 
 class GenerateWorker(QThread):
@@ -76,7 +89,7 @@ class CertsTab(QWidget):
         )
 
         # Help section (PDF guide)
-        docs_pdf_path = Path(__file__).resolve().parents[3] / "docs" / "Guia_Facturacion_Electronica_ARCA.pdf"
+        docs_pdf_path = get_docs_dir() / "Guia_Facturacion_Electronica_ARCA.pdf"
         help_card = CardWidget()
         help_layout = QVBoxLayout()
         help_layout.setSpacing(10)
@@ -89,9 +102,7 @@ class CertsTab(QWidget):
         )
 
         if docs_pdf_path.exists():
-            help_layout.addWidget(
-                QLabel("Podés abrir la guía haciendo click en el botón:" )
-            )
+            help_layout.addWidget(QLabel("Podés abrir la guía haciendo click en el botón:"))
             open_btn = QPushButton("Abrir guía (PDF)")
             open_btn.setObjectName("btn_secondary")
 
@@ -379,4 +390,3 @@ class CertsTab(QWidget):
             "Falta el certificado de AFIP. No podés emitir facturas hasta completar el paso 3."
         )
         self._banner.setObjectName("alert_warning")
-

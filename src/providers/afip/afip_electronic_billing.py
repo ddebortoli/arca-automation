@@ -136,26 +136,28 @@ class AfipElectronicBillingProvider:
                 "CbteTipo": wsfe.tipo_factura,
             },
             "FeDetReq": {
-                "FECAEDetRequest": [{
-                    "Concepto": wsfe.concepto,
-                    "DocTipo": wsfe.doc_tipo,
-                    "DocNro": wsfe.doc_nro,
-                    "CbteDesde": invoice_number,
-                    "CbteHasta": invoice_number,
-                    "CbteFch": fecha,
-                    "ImpTotal": float(amount),
-                    "ImpTotConc": 0,
-                    "ImpNeto": float(amount),
-                    "ImpOpEx": 0,
-                    "ImpTrib": 0,
-                    "ImpIVA": 0,
-                    "MonId": "PES",
-                    "MonCotiz": 1,
-                    "FchServDesde": fecha,
-                    "FchServHasta": fecha,
-                    "FchVtoPago": fecha,
-                    "CondicionIVAReceptorId": wsfe.condicion_iva,
-                }]
+                "FECAEDetRequest": [
+                    {
+                        "Concepto": wsfe.concepto,
+                        "DocTipo": wsfe.doc_tipo,
+                        "DocNro": wsfe.doc_nro,
+                        "CbteDesde": invoice_number,
+                        "CbteHasta": invoice_number,
+                        "CbteFch": fecha,
+                        "ImpTotal": float(amount),
+                        "ImpTotConc": 0,
+                        "ImpNeto": float(amount),
+                        "ImpOpEx": 0,
+                        "ImpTrib": 0,
+                        "ImpIVA": 0,
+                        "MonId": "PES",
+                        "MonCotiz": 1,
+                        "FchServDesde": fecha,
+                        "FchServHasta": fecha,
+                        "FchVtoPago": fecha,
+                        "CondicionIVAReceptorId": wsfe.condicion_iva,
+                    }
+                ]
             },
         }
 
@@ -168,9 +170,7 @@ class AfipElectronicBillingProvider:
             detail = response.FeDetResp.FECAEDetResponse[0]
 
             if detail.Resultado != "A":
-                raise AfipInvoiceError(
-                    f"Voucher rejected: {detail.Observaciones}"
-                )
+                raise AfipInvoiceError(f"Voucher rejected: {detail.Observaciones}")
 
             logger.debug(
                 "AFIP voucher created: CAE=%s number=%d",
@@ -186,9 +186,7 @@ class AfipElectronicBillingProvider:
         except AfipInvoiceError:
             raise
         except Exception as exc:
-            raise AfipInvoiceError(
-                f"AFIP rejected voucher: {exc}"
-            ) from exc
+            raise AfipInvoiceError(f"AFIP rejected voucher: {exc}") from exc
 
     def _next_invoice_number(self) -> int:
         wsfe = load_wsfe_settings()

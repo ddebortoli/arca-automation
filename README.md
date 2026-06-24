@@ -1,18 +1,65 @@
-# arca-automation
+# arca-automation (Facturador AFIP)
 
-Automates invoicing for MercadoPago income payments through AFIP (Argentina). Fetches transfers from MercadoPago, optionally asks for human approval via Telegram, and issues **Factura C** vouchers to **Consumidor Final** through AFIP WSFE.
+Automatiza la facturación de cobros de MercadoPago a través de AFIP (Argentina). Obtiene transferencias, opcionalmente pide aprobación humana vía Telegram, y emite **Factura C** a **Consumidor Final** por WSFE.
+
+**Desarrollado por [Damian Debortoli](https://www.ddebortoli.dev/)** — [developer.ddebortoli@gmail.com](mailto:developer.ddebortoli@gmail.com)
+
+Licencia: [MIT](LICENSE) — software libre; se requiere conservar el aviso de copyright.
+
+---
+
+## Modos de uso
+
+El mismo núcleo (`src/`) se puede ejecutar de dos formas:
+
+| Modo | Para quién | Config | Entry points |
+|------|------------|--------|--------------|
+| **Servidor / scripts** | Cron, VPS, desarrollo | `.env` en el repo | `main.py`, `telegram_bot.py` |
+| **Desktop (PyQt6)** | Usuario final en su PC | `~/.facturador/.env` | App GUI o `Facturador.app` / `.exe` |
+
+```bash
+# Servidor — sync
+uv run main.py
+
+# Servidor — bot Telegram (proceso aparte, modo telegram)
+uv run telegram_bot.py
+
+# Desktop — desarrollo
+uv run desktop/facturador_pyqt6_app/main.py
+
+# Desktop — ejecutable empaquetado (macOS)
+open dist/Facturador.app
+```
+
+---
+
+## Características
+
+- Integración **MercadoPago** → pagos de ingreso del usuario autenticado
+- Emisión **AFIP WSFE** (Factura C, Consumidor Final) con certificado propio
+- Modo **auto** o aprobación manual por **Telegram** (grupo o chat privado)
+- Persistencia **SQLite** local (sin config) o **PostgreSQL** remoto (Supabase, etc.)
+- **App de escritorio** PyQt6: configuración guiada, certificados, ejecución in-process
+- **Exportar / importar** configuración (`.facturador.json`)
+- **Empaquetado** con PyInstaller (`.app`, `.exe`, Linux)
+- Observabilidad opcional: stdout, Logfire, Sentry
+
+---
 
 ## Overview
 
 | Layer | Responsibility |
-|---|---|
+|-------|----------------|
 | **Domain** | Models, ports (interfaces), business rules |
 | **Use cases** | Workflow orchestration |
-| **Providers** | External integrations (MercadoPago, AFIP, Telegram) |
-| **Repository** | SQLite persistence |
+| **Providers** | MercadoPago, AFIP, Telegram, observability |
+| **Repository** | SQLite or PostgreSQL persistence |
+| **Pipeline** | Shared entry points for CLI and desktop |
 | **Bootstrap** | Dependency wiring from environment |
 
-The design follows **ports & adapters**: use cases depend on protocols (`MercadoPagoPort`, `AfipPort`, `ApprovalPort`), not concrete implementations.
+Diseño **ports & adapters**: los use cases dependen de protocolos (`MercadoPagoPort`, `AfipPort`, `ApprovalPort`, `PaymentRepositoryPort`), no de implementaciones concretas.
+
+---
 
 ## Architecture
 
@@ -21,6 +68,12 @@ flowchart TB
     subgraph entry [Entry Points]
         MAIN[main.py - cron sync]
         BOT[telegram_bot.py - approval worker]
+        DESK[Desktop app - PyQt6]
+    end
+
+    subgraph pipeline [src/pipeline.py]
+        RUN[run_payment_pipeline]
+        TG_THREAD[start_telegram_bot_thread]
     end
 
     subgraph usecases [Use Cases]
@@ -30,33 +83,22 @@ flowchart TB
         PO[PostponePaymentUseCase]
     end
 
-    subgraph ports [Ports]
-        MP[MercadoPagoPort]
-        AFIP[AfipPort]
-        APPR[ApprovalPort]
+    subgraph repos [Repository]
+        SQLITE[SqlitePaymentRepository]
+        PG[PostgresPaymentRepository]
     end
 
-    subgraph providers [Providers]
-        HTTP_MP[HttpMercadoPagoProvider]
-        AFIP_AUTH[AfipAuthProvider - WSAA]
-        AFIP_BILL[AfipElectronicBillingProvider - WSFE]
-        AUTO[AutoApprovalProvider]
-        TG[TelegramApprovalProvider]
-    end
-
-    DB[(payments.db)]
-
-    MAIN --> PP
-    BOT --> II & RP & PO
-    PP --> MP & AFIP & APPR & DB
-    II --> AFIP & DB
-    RP --> DB
-    PO --> DB
-
-    MP --> HTTP_MP
-    AFIP --> AFIP_AUTH & AFIP_BILL
-    APPR --> AUTO & TG
+    MAIN --> RUN
+    DESK --> RUN
+    DESK --> TG_THREAD
+    BOT --> TG_THREAD
+    RUN --> PP
+    TG_THREAD --> II & RP & PO
+    PP --> repos
+    II --> repos
 ```
+
+---
 
 ## Payment lifecycle
 
@@ -75,69 +117,71 @@ stateDiagram-v2
 ```
 
 | Status | Meaning | Retries? |
-|---|---|---|
+|--------|---------|----------|
 | `fetched` | Seen from MP, not yet invoiced or re-offered | Yes |
 | `pending_approval` | Telegram message sent, awaiting decision | No until you act |
 | `issued` | CAE obtained from AFIP | — |
 | `failed` | AFIP technical error | Yes |
 | `rejected` | User rejected via Telegram | **No — terminal** |
 
+---
+
 ## Project structure
 
 ```
 arca-automation/
-├── main.py                 # Cron/sync entry point
-├── telegram_bot.py         # Telegram approval worker (long-running)
-├── payments.db             # SQLite state (created at runtime)
-├── certs/                  # AFIP certificate + private key (gitignored)
+├── main.py                      # CLI sync entry point
+├── telegram_bot.py              # Telegram approval worker (long-running)
+├── LICENSE                      # MIT
+├── packaging/facturador.spec    # PyInstaller spec
+├── scripts/
+│   ├── build_desktop.sh         # Build .app / Linux binary
+│   └── build_desktop.ps1        # Build Windows .exe
+├── desktop/facturador_pyqt6_app/
+│   ├── main.py                  # Desktop entry point
+│   ├── core/                    # Config, paths, export/import
+│   └── ui/                      # PyQt6 tabs
+├── docs/                        # PDF guides (bundled in desktop build)
 ├── src/
-│   ├── bootstrap.py        # Config loading + factory functions
+│   ├── bootstrap.py             # Config + factory functions
+│   ├── pipeline.py              # Shared pipeline + Telegram thread
+│   ├── paths.py                 # ~/.facturador paths
+│   ├── metadata.py              # Authorship
 │   ├── domain/
-│   │   ├── models.py       # MercadoPagoPayment, IssuedInvoice, InvoicePreview
-│   │   ├── ports.py        # Protocol interfaces
-│   │   ├── config.py       # ApprovalConfig
-│   │   ├── exceptions.py
-│   │   ├── datetime_utils.py
-│   │   └── income.py       # MP income detection rules
 │   ├── use_cases/
-│   │   ├── process_payments.py
-│   │   ├── issue_invoice.py
-│   │   ├── reject_payment.py
-│   │   └── postpone_payment.py
 │   ├── providers/
-│   │   ├── mercadopago.py
-│   │   ├── afip/
-│   │   │   ├── auth.py           # WSAA authentication
-│   │   │   ├── afip_electronic_billing.py  # WSFE invoicing
-│   │   │   └── transport.py      # SSL fix for AFIP legacy DH
-│   │   └── approval/
-│   │       ├── auto.py
-│   │       └── telegram.py
 │   └── repositories/
-│       └── payment_repository.py
+│       ├── sqlite_payment_repository.py
+│       └── postgres_payment_repository.py
 └── tests/
 ```
+
+---
 
 ## Requirements
 
 - **Python** ≥ 3.13
-- **[uv](https://github.com/astral-sh/uv)** (package manager)
-- **OpenSSL** (for WSAA CMS signing)
-- MercadoPago API access token
-- AFIP production certificate + private key
-- (Optional) Telegram bot token + chat ID
+- **[uv](https://github.com/astral-sh/uv)**
+- **OpenSSL** on PATH (firma WSAA CMS; requerido también en builds empaquetados)
+- Token MercadoPago, certificado AFIP producción + clave privada
+- (Opcional) Bot Telegram + chat/grupo ID
+- (Opcional) PostgreSQL (`DATABASE_URL`) para multi-dispositivo
 
 ### Dependencies
 
 | Package | Purpose |
-|---|---|
+|---------|---------|
 | `httpx` | MercadoPago + Telegram HTTP |
 | `zeep` | AFIP SOAP (WSAA, WSFE) |
 | `pydantic` | Domain models |
 | `python-dotenv` | `.env` loading |
+| `psycopg` | PostgreSQL repository |
+| `PyQt6` | Desktop app |
 | `cryptography`, `lxml` | zeep / SSL stack |
 
-## Setup
+---
+
+## Setup (servidor / CLI)
 
 ### 1. Install
 
@@ -149,7 +193,7 @@ uv sync
 
 ### 2. AFIP certificates
 
-Place your AFIP production cert and key in `certs/` (directory is gitignored):
+Colocá cert y key de AFIP (producción) en `certs/` (gitignored) o paths absolutos en `.env`:
 
 ```
 certs/cert.crt
@@ -158,7 +202,7 @@ certs/private.key
 
 ### 3. Environment variables
 
-Create a `.env` file at the project root:
+Creá `.env` en la raíz del repo:
 
 ```env
 # MercadoPago
@@ -170,200 +214,195 @@ AFIP_CUIT=20123456789
 AFIP_CERT_PATH=certs/cert.crt
 AFIP_KEY_PATH=certs/private.key
 
+# Database (optional — default: SQLite in ~/.facturador/payments.db)
+DATABASE_BACKEND=sqlite          # sqlite | postgres
+DATABASE_PATH=                   # optional; empty = ~/.facturador/payments.db
+DATABASE_URL=                    # required if postgres
+
 # Approval (optional)
-APPROVAL_MODE=auto          # or "telegram"
-TELEGRAM_BOT_TOKEN=         # required if mode=telegram
-TELEGRAM_CHAT_ID=           # required if mode=telegram
+APPROVAL_MODE=auto               # auto | telegram
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=                # chat privado o grupo (-100...)
+
+# WSFE overrides (optional — desktop UI can set these too)
+AFIP_WSFE_PUNTO_DE_VENTA=2
+AFIP_WSFE_TIPO_FACTURA=11
+# ...
+
+# Observability (optional)
+OBSERVABILITY_BACKEND=stdio      # stdio | logfire | sentry
 ```
 
-### 4. Telegram setup (manual approval)
+Para mantener la DB en el repo (servidor legacy):
 
-1. Create a bot via [@BotFather](https://t.me/BotFather)
-2. Send a message to your bot
-3. Get your `chat_id` from `https://api.telegram.org/bot<TOKEN>/getUpdates`
-4. Set `APPROVAL_MODE=telegram`, `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_CHAT_ID`
+```env
+DATABASE_PATH=/path/to/arca-automation/payments.db
+```
 
-## Running
+---
 
-### Auto mode (no Telegram)
+## Desktop app
+
+### Configuración
+
+La app guarda todo en `~/.facturador/`:
+
+| Path | Content |
+|------|---------|
+| `~/.facturador/.env` | Variables de entorno |
+| `~/.facturador/certs/` | Certificado AFIP + clave |
+| `~/.facturador/payments.db` | SQLite por defecto |
+
+Al ejecutar, la UI setea `ARC_ENV_FILE` y corre el pipeline **in-process** (sin `uv run` subprocess).
+
+### Tabs
+
+- **Configuración** — MP, AFIP, WSFE, Telegram, base de datos, export/import
+- **Certificados** — generar CSR, importar `cert.crt`
+- **Ejecutar** — sync + logs en pantalla
+
+### Base de datos
+
+| Modo | Cuándo |
+|------|--------|
+| **SQLite local** | Default, cero config |
+| **PostgreSQL** | Supabase / Neon / propio — pegar connection string URI |
+
+### Export / import
+
+- **Exportar** → `*.facturador.json` (incluye tokens y certs — **no commitear**)
+- **Importar** → reemplaza valores; campos vacíos en el archivo conservan el valor actual
+
+### Telegram en desktop
+
+- Un solo bot thread por proceso (re-ejecutar no abre otro poller)
+- Si otro dispositivo ya hace polling → log: *"Otro dispositivo está usando la conexión del bot…"*
+- Para grupo: agregar el bot al grupo y usar el `chat_id` del grupo (`-100…`)
+
+### Build ejecutable
+
+```bash
+./scripts/build_desktop.sh          # macOS / Linux
+# .\scripts\build_desktop.ps1       # Windows
+```
+
+| OS | Output |
+|----|--------|
+| macOS | `dist/Facturador.app` |
+| Linux | `dist/Facturador/Facturador` |
+| Windows | `dist\Facturador\Facturador.exe` |
+
+Distribuí la carpeta completa en Windows (no solo el `.exe`). OpenSSL debe estar disponible en el sistema.
+
+---
+
+## Running (servidor)
+
+### Auto mode
 
 ```bash
 uv run main.py
 ```
 
-Invoices are issued immediately for all `fetched` payments.
-
 ### Telegram approval mode
 
-Two processes are required:
-
-**Terminal 1 — bot (always on):**
+**Terminal 1 — bot (siempre activo):**
 
 ```bash
 uv run telegram_bot.py
 ```
 
-**Terminal 2 — sync (cron or manual):**
+**Terminal 2 — sync (cron o manual):**
 
 ```bash
 uv run main.py
 ```
 
-### Cron example (23:00 ART ≈ 02:00 UTC)
+### Cron (23:00 ART ≈ 02:00 UTC)
 
 ```cron
 0 2 * * * cd /path/to/arca-automation && uv run main.py >> logs/cron.log 2>&1
 ```
 
+En modo Telegram, `telegram_bot.py` debe correr como servicio (systemd, etc.).
+
+---
+
 ## Observability
 
-Logging uses Python's stdlib `logging` throughout. The backend is chosen once at startup via `OBSERVABILITY_BACKEND` — no code changes needed to switch providers.
-
 | Backend | Config | Install |
-|---|---|---|
-| `stdio` (default) | No extra vars | `uv sync` |
+|---------|--------|---------|
+| `stdio` (default) | — | `uv sync` |
 | `logfire` | `LOGFIRE_TOKEN` | `uv sync --extra logfire` |
 | `sentry` | `SENTRY_DSN` | `uv sync --extra sentry` |
 
-### Examples
-
-**Logfire:**
-
-```env
-OBSERVABILITY_BACKEND=logfire
-LOGFIRE_TOKEN=your-write-token
-SERVICE_NAME=arca-automation
-```
-
-**Stdout only (no external provider):**
-
-```env
-OBSERVABILITY_BACKEND=stdio
-```
-
-Or omit `OBSERVABILITY_BACKEND` entirely — stdout is the default.
-
-**Sentry:**
-
-```env
-OBSERVABILITY_BACKEND=sentry
-SENTRY_DSN=https://xxx@xxx.ingest.sentry.io/xxx
-```
-
-Both `main.py` and `telegram_bot.py` call `configure_observability()` at startup.
-
-## Payment statuses
-
-| Status | Meaning |
-|---|---|
-| `fetched` | New from MP, awaiting processing |
-| `pending_approval` | Telegram message sent |
-| `issued` | Invoiced with CAE |
-| `failed` | AFIP error (retries) |
-| `rejected` | User rejected (terminal) |
-For Telegram mode, run `telegram_bot.py` as a systemd service (or similar) so it stays alive between syncs.
-
-## Workflows
-
-### Sync pipeline (`main.py` → `ProcessPaymentsUseCase`)
-
-1. Compute current-month date range in ART (`NOW-NDAYS` … `NOW`)
-2. Fetch income payments from MercadoPago (paginated)
-3. Insert new payments as `fetched`
-4. For each `fetched` payment:
-   - **auto**: call AFIP → `issued` or `failed`
-   - **telegram**: build preview, send Telegram message → `pending_approval`
-
-### Telegram bot (`telegram_bot.py`)
-
-Polls Telegram for inline button callbacks:
-
-| Button | Action | Result |
-|---|---|---|
-| ✅ Confirmar | `IssueInvoiceUseCase` | `issued` or `failed` |
-| ❌ Rechazar | `RejectPaymentUseCase` | `rejected` (terminal) |
-| ⏸ Posponer | `PostponePaymentUseCase` | back to `fetched`; re-offered on next sync |
-
-Multiple payments produce **one Telegram message each**, sent in the same sync run. Decisions are independent and can happen in any order. Payments in `pending_approval` are not re-notified until postponed or decided.
+---
 
 ## AFIP invoice defaults
 
-Configured in `src/providers/afip/afip_electronic_billing.py`:
-
 | Field | Value | Meaning |
-|---|---|---|
+|-------|-------|---------|
 | `CbteTipo` | 11 | Factura C |
 | `PtoVta` | 2 | Point of sale 2 |
 | `Concepto` | 2 | Servicios |
 | `DocTipo` | 99 | Consumidor Final |
-| `DocNro` | 0 | No document number |
 | `CondicionIVAReceptorId` | 5 | Consumidor Final |
-| `ImpTotal` / `ImpNeto` | payment amount | No IVA breakdown |
-| `ImpIVA` | 0 | Monotributo-style |
-| `MonId` | PES | Argentine pesos |
 
-Service dates (`FchServDesde`, `FchServHasta`, `FchVtoPago`, `CbteFch`) use the MercadoPago payment date.
+Configurable vía env `AFIP_WSFE_*` o la UI desktop.
 
-## AFIP authentication
-
-`AfipAuthProvider` (`src/providers/afip/auth.py`):
-
-1. Builds a Login Ticket Request (TRA) in **Argentina local time**
-2. Signs it with OpenSSL CMS
-3. Exchanges it at WSAA for `token` + `sign`
-4. **Caches credentials** and renews ~5 minutes before expiration
-
-WSFE calls reuse cached credentials via `AfipElectronicBillingProvider`.
+---
 
 ## Database schema
 
-SQLite table `payments`:
+Table `payments` (SQLite y PostgreSQL):
 
-| Column | Type | Description |
-|---|---|---|
-| `mp_payment_id` | INTEGER PK | MercadoPago payment ID |
-| `status` | TEXT | Lifecycle status |
-| `transaction_amount` | REAL | Amount in ARS |
-| `date_created` | TEXT | Payment datetime (ISO) |
-| `cae` | TEXT | AFIP CAE (when issued) |
-| `cae_expiry` | TEXT | CAE expiration |
-| `invoice_number` | INTEGER | Voucher number |
-| `error_message` | TEXT | Failure/rejection reason |
-| `created_at` / `updated_at` | TEXT | Audit timestamps |
+| Column | Description |
+|--------|-------------|
+| `mp_payment_id` | MercadoPago payment ID (PK) |
+| `status` | Lifecycle status |
+| `transaction_amount` | Amount in ARS |
+| `cae`, `cae_expiry`, `invoice_number` | AFIP result when issued |
+| `error_message` | Failure/rejection reason |
+| `created_at`, `updated_at` | Audit timestamps |
 
-## Testing
+---
+
+## Testing & formatting
 
 ```bash
-uv run pytest          # all tests
-uv run pytest -q       # quiet
+uv run pytest -q
+uv run black --check .
+uv run black .    # format
 ```
 
-Coverage includes MercadoPago income rules, AFIP auth caching, approval flow, and Telegram message formatting.
-
-## Extensibility
-
-The codebase is structured for per-user configuration:
-
-- `ApprovalPort` — swap `auto` / `telegram` / future channels
-- `ApprovalConfig` — feature flags per tenant
-- `bootstrap.py` — composition root; can be extended to load `TenantConfig` from DB
-- Ports isolate MercadoPago, AFIP, and approval from business logic
+---
 
 ## Troubleshooting
 
 | Issue | Cause / fix |
-|---|---|
-| `DH_KEY_TOO_SMALL` SSL error | Handled by `src/providers/afip/transport.py` (`SECLEVEL=1`) |
-| `generationTime inválido` | TRA must use ART, not UTC — fixed in `auth.py` |
-| Payments stuck in `fetched` | Telegram mode: run `telegram_bot.py` |
-| Payments stuck in `pending_approval` | Decide in Telegram, or postpone to retry later |
-| `rejected` won't retry | By design — terminal status |
-| Bot button does nothing | Restart `telegram_bot.py` after code changes |
-| Cert not found | Check `AFIP_CERT_PATH` / `AFIP_KEY_PATH` in `.env` |
+|-------|-------------|
+| `DH_KEY_TOO_SMALL` | Handled in `src/providers/afip/transport.py` |
+| Payments stuck in `fetched` | Telegram: run bot / desktop with listener active |
+| Telegram 409 Conflict | Otro dispositivo o `telegram_bot.py` ya hace polling |
+| Bot no responde en desktop | Segunda ejecución reutiliza el mismo thread; revisar logs |
+| Cert not found | `AFIP_CERT_PATH` / paths en `~/.facturador/certs/` |
+| Desktop sin logs | Ver panel "Log de ejecución"; stderr en terminal si corrés desde CLI |
+
+---
 
 ## Entry points
 
-| Command | When to run | Purpose |
-|---|---|---|
-| `uv run main.py` | Cron / manual | Fetch MP payments, submit for approval or auto-invoice |
-| `uv run telegram_bot.py` | Always (telegram mode) | Handle approve / reject / postpone callbacks |
+| Command | When | Purpose |
+|---------|------|---------|
+| `uv run main.py` | Cron / manual | Fetch MP, approve or auto-invoice |
+| `uv run telegram_bot.py` | Telegram mode (servidor) | Handle approve / reject / postpone |
+| `uv run desktop/.../main.py` | Desktop dev | GUI |
+| `dist/Facturador.app` | Desktop distribuido | GUI empaquetada |
+
+---
+
+## License & authorship
+
+Copyright (c) 2026 **Damian Debortoli** — [ddebortoli.dev](https://www.ddebortoli.dev/) — [developer.ddebortoli@gmail.com](mailto:developer.ddebortoli@gmail.com)
+
+Released under the [MIT License](LICENSE). Podés usar, modificar y distribuir el software libremente; debés incluir el aviso de copyright y la licencia en copias o derivados.

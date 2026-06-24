@@ -60,8 +60,7 @@ DARK_PALETTE: dict[str, str] = {
     "ok_fg": "#7bdcb8",
 }
 
-_QSS_TEMPLATE = Template(
-    """
+_QSS_TEMPLATE = Template("""
 QWidget {
     font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
     font-size: 13px;
@@ -325,8 +324,7 @@ QWidget#stat_card {
     border: 1px solid $border;
     border-radius: 8px;
 }
-"""
-)
+""")
 
 
 def build_stylesheet(theme: str = "light") -> str:

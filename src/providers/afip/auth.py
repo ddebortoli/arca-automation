@@ -151,9 +151,7 @@ class AfipAuthProvider:
         try:
             login_response = self._get_client().service.loginCms(cms)
         except Exception as exc:
-            raise AfipAuthenticationError(
-                f"WSAA authentication failed: {exc}"
-            ) from exc
+            raise AfipAuthenticationError(f"WSAA authentication failed: {exc}") from exc
 
         return self._parse_response(login_response)
 
@@ -224,9 +222,7 @@ class AfipAuthProvider:
             )
 
             if result.returncode != 0:
-                raise AfipAuthenticationError(
-                    f"OpenSSL signing failed: {result.stderr}"
-                )
+                raise AfipAuthenticationError(f"OpenSSL signing failed: {result.stderr}")
 
             return base64.b64encode(Path(cms_path).read_bytes()).decode()
         finally:
@@ -248,6 +244,4 @@ class AfipAuthProvider:
             )
 
         except Exception as exc:
-            raise AfipAuthenticationError(
-                f"Invalid WSAA response: {exc}"
-            ) from exc
+            raise AfipAuthenticationError(f"Invalid WSAA response: {exc}") from exc

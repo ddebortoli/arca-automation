@@ -2,22 +2,30 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from PyQt6.QtCore import QUrl, pyqtSignal, Qt
+from PyQt6.QtCore import QUrl, QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
-from core.config import load_config, save_config
+from core.config import (
+    export_config_json,
+    get_default_database_path,
+    import_config_json,
+    load_config,
+    save_config,
+)
+from core.paths import get_docs_dir
+from src.bootstrap import verify_database_connection
 from ui.widgets import (
     AlertBanner,
     CardWidget,
@@ -28,6 +36,32 @@ from ui.widgets import (
 )
 
 
+class DatabaseTestWorker(QThread):
+    """Test database connectivity in the background."""
+
+    ok = pyqtSignal()
+    failed = pyqtSignal(str)
+
+    def __init__(
+        self,
+        backend: str,
+        database_url: str,
+    ) -> None:
+        super().__init__()
+        self._backend = backend
+        self._database_url = database_url
+
+    def run(self) -> None:
+        try:
+            verify_database_connection(
+                backend=self._backend,
+                database_url=self._database_url,
+            )
+            self.ok.emit()
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
+
+
 class ConfigTab(QWidget):
     """Configuration form persisted in `~/.facturador/.env`."""
 
@@ -36,6 +70,8 @@ class ConfigTab(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._approval_mode: str = "auto"
+        self._database_backend: str = "sqlite"
+        self._db_test_worker: DatabaseTestWorker | None = None
 
         self._build_ui()
         self._load()
@@ -66,13 +102,15 @@ class ConfigTab(QWidget):
         self.afip_cuit.setPlaceholderText("20-00000000-0")
         row_afip.addWidget(make_field("CUIT", self.afip_cuit))
 
-        #self.afip_token = SecretLineEdit("AFIP_ACCESS_TOKEN")
-        #row_afip.addWidget(make_field("Access token", self.afip_token))
+        # self.afip_token = SecretLineEdit("AFIP_ACCESS_TOKEN")
+        # row_afip.addWidget(make_field("Access token", self.afip_token))
 
         afip_card.layout().addLayout(row_afip)
         content_layout.addWidget(afip_card)
 
-        content_layout.addWidget(make_section_header("MercadoPago", "Credenciales para obtener movimientos."))
+        content_layout.addWidget(
+            make_section_header("MercadoPago", "Credenciales para obtener movimientos.")
+        )
         mp_card = CardWidget()
         row_mp = QHBoxLayout()
         row_mp.setSpacing(12)
@@ -86,7 +124,7 @@ class ConfigTab(QWidget):
         mp_card.layout().addLayout(row_mp)
 
         # Help section (PDF guide)
-        docs_pdf_path = Path(__file__).resolve().parents[3] / "docs" / "Guia_Integracion_MercadoPago.pdf"
+        docs_pdf_path = get_docs_dir() / "Guia_Integracion_MercadoPago.pdf"
         mp_card.layout().addWidget(make_divider())
         help_layout = QVBoxLayout()
         help_layout.setSpacing(10)
@@ -98,9 +136,7 @@ class ConfigTab(QWidget):
         )
 
         if docs_pdf_path.exists():
-            help_layout.addWidget(
-                QLabel("Podés abrir la guía haciendo click en el botón:")
-            )
+            help_layout.addWidget(QLabel("Podés abrir la guía haciendo click en el botón:"))
             open_btn = QPushButton("Abrir guía (PDF)")
             open_btn.setObjectName("btn_secondary")
 
@@ -206,11 +242,7 @@ class ConfigTab(QWidget):
         tg_layout.addWidget(make_divider())
 
         # Help section (PDF guide)
-        docs_pdf_path = (
-            Path(__file__).resolve().parents[3]
-            / "docs"
-            / "Guia_Configuracion_Bot_Telegram.pdf"
-        )
+        docs_pdf_path = get_docs_dir() / "Guia_Configuracion_Bot_Telegram.pdf"
         tg_layout.addWidget(
             make_section_header(
                 "Ayuda",
@@ -218,9 +250,7 @@ class ConfigTab(QWidget):
             )
         )
         if docs_pdf_path.exists():
-            tg_layout.addWidget(
-                QLabel("Podés abrir la guía haciendo click en el botón:")
-            )
+            tg_layout.addWidget(QLabel("Podés abrir la guía haciendo click en el botón:"))
             open_btn = QPushButton("Abrir guía (PDF)")
             open_btn.setObjectName("btn_secondary")
 
@@ -230,9 +260,7 @@ class ConfigTab(QWidget):
             open_btn.clicked.connect(_open_docs)  # type: ignore[arg-type]
             tg_layout.addWidget(open_btn)
         else:
-            tg_layout.addWidget(
-                AlertBanner("Guía PDF no encontrada en `docs/`.", kind="warning")
-            )
+            tg_layout.addWidget(AlertBanner("Guía PDF no encontrada en `docs/`.", kind="warning"))
 
         tg_row = QHBoxLayout()
         tg_row.setSpacing(12)
@@ -247,7 +275,70 @@ class ConfigTab(QWidget):
         approval_card.layout().addWidget(self._telegram_widget)
         content_layout.addWidget(approval_card)
 
-        content_layout.addWidget(make_section_header("Observabilidad (opcional)", "Usa logfire para trazas detalladas."))
+        content_layout.addWidget(
+            make_section_header(
+                "Base de datos",
+                "SQLite local por defecto, o PostgreSQL remoto (Supabase, etc.).",
+            )
+        )
+        db_card = CardWidget()
+        db_toggle_group = QWidget()
+        db_toggle_layout = QHBoxLayout(db_toggle_group)
+        db_toggle_layout.setContentsMargins(0, 0, 0, 0)
+        db_toggle_layout.setSpacing(0)
+        db_toggle_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
+        self.btn_db_sqlite = QPushButton("Local (SQLite)")
+        self.btn_db_sqlite.setObjectName("toggle_btn_left")
+        self.btn_db_sqlite.clicked.connect(lambda: self._set_db_mode("sqlite"))  # type: ignore[arg-type]
+        db_toggle_layout.addWidget(self.btn_db_sqlite)
+
+        self.btn_db_postgres = QPushButton("Remota (PostgreSQL)")
+        self.btn_db_postgres.setObjectName("toggle_btn_right")
+        self.btn_db_postgres.clicked.connect(lambda: self._set_db_mode("postgres"))  # type: ignore[arg-type]
+        db_toggle_layout.addWidget(self.btn_db_postgres)
+        db_card.layout().addWidget(db_toggle_group)
+
+        self._sqlite_info = QLabel(
+            f"Sin configuración. Los datos se guardan en {get_default_database_path()}"
+        )
+        self._sqlite_info.setWordWrap(True)
+        self._sqlite_info.setStyleSheet("font-size:12px; color:#666; margin-top:8px;")
+        db_card.layout().addWidget(self._sqlite_info)
+
+        self._postgres_widget = QWidget()
+        pg_layout = QVBoxLayout(self._postgres_widget)
+        pg_layout.setContentsMargins(0, 8, 0, 0)
+        pg_layout.setSpacing(12)
+        pg_layout.addWidget(make_divider())
+
+        pg_row = QHBoxLayout()
+        pg_row.setSpacing(12)
+        self.database_url = SecretLineEdit("postgresql://...")
+        pg_row.addWidget(make_field("Connection string", self.database_url), 1)
+
+        self._test_db_btn = QPushButton("Probar conexión")
+        self._test_db_btn.setObjectName("btn_secondary")
+        self._test_db_btn.clicked.connect(self._test_database)  # type: ignore[arg-type]
+        pg_row.addWidget(self._test_db_btn, alignment=Qt.AlignmentFlag.AlignBottom)
+        pg_layout.addLayout(pg_row)
+
+        self._db_test_status = QLabel("")
+        self._db_test_status.setStyleSheet("font-size:12px; color:#888;")
+        pg_layout.addWidget(self._db_test_status)
+
+        pg_layout.addWidget(
+            QLabel(
+                "En Supabase: Project Settings → Database → Connection string (URI). "
+                "Usá modo Session si está disponible."
+            )
+        )
+        db_card.layout().addWidget(self._postgres_widget)
+        content_layout.addWidget(db_card)
+
+        content_layout.addWidget(
+            make_section_header("Observabilidad (opcional)", "Usa logfire para trazas detalladas.")
+        )
         obs_card = CardWidget()
         self._logfire_check = QCheckBox("Activar Logfire")
         obs_card.layout().addWidget(self._logfire_check)
@@ -276,12 +367,36 @@ class ConfigTab(QWidget):
         footer_layout.addWidget(self._save_status)
         footer_layout.addStretch()
 
+        export_btn = QPushButton("Exportar configuración")
+        export_btn.setObjectName("btn_secondary")
+        export_btn.clicked.connect(self._export_config)  # type: ignore[arg-type]
+        footer_layout.addWidget(export_btn)
+
+        import_btn = QPushButton("Importar configuración")
+        import_btn.setObjectName("btn_secondary")
+        import_btn.clicked.connect(self._import_config)  # type: ignore[arg-type]
+        footer_layout.addWidget(import_btn)
+
         save_btn = QPushButton("Guardar cambios")
         save_btn.setObjectName("btn_primary")
         save_btn.clicked.connect(self._save)  # type: ignore[arg-type]
         footer_layout.addWidget(save_btn)
 
         outer.addWidget(footer)
+
+    def _set_db_mode(self, mode: str) -> None:
+        self._database_backend = mode
+        postgres_visible = mode == "postgres"
+        self._postgres_widget.setVisible(postgres_visible)
+        self._sqlite_info.setVisible(not postgres_visible)
+        self.database_url.setEnabled(postgres_visible)  # type: ignore[attr-defined]
+        self._test_db_btn.setEnabled(postgres_visible)
+
+        self.btn_db_sqlite.setProperty("active", mode == "sqlite")
+        self.btn_db_postgres.setProperty("active", mode == "postgres")
+        for btn in (self.btn_db_sqlite, self.btn_db_postgres):
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
 
     def _set_mode(self, mode: str) -> None:
         self._approval_mode = mode
@@ -306,7 +421,7 @@ class ConfigTab(QWidget):
         cfg = load_config()
 
         self.afip_cuit.setText(cfg.get("AFIP_CUIT", ""))
-        #self.afip_token.setText(cfg.get("AFIP_ACCESS_TOKEN", ""))  # type: ignore[attr-defined]
+        # self.afip_token.setText(cfg.get("AFIP_ACCESS_TOKEN", ""))  # type: ignore[attr-defined]
         self.mp_user_id.setText(cfg.get("MP_USER_ID", ""))
         self.mp_token.setText(cfg.get("MP_ACCESS_TOKEN", ""))  # type: ignore[arg-type]
 
@@ -331,16 +446,20 @@ class ConfigTab(QWidget):
             self._logfire_check.setChecked(True)
             self.logfire_token.setText(cfg.get("LOGFIRE_TOKEN", ""))  # type: ignore[arg-type]
 
-    def _save(self) -> None:
-        data = {
+        db_backend = cfg.get("DATABASE_BACKEND", "sqlite")
+        self._set_db_mode(db_backend)
+        if db_backend == "postgres":
+            self.database_url.setText(cfg.get("DATABASE_URL", ""))  # type: ignore[attr-defined]
+
+    def _collect_form_data(self) -> dict[str, str]:
+        return {
             "AFIP_CUIT": self.afip_cuit.text().strip(),
-            #"AFIP_ACCESS_TOKEN": self.afip_token.text().strip(),
             "MP_ACCESS_TOKEN": self.mp_token.text().strip(),  # type: ignore[union-attr]
             "MP_USER_ID": self.mp_user_id.text().strip(),
             "APPROVAL_MODE": self._approval_mode,
             "TELEGRAM_BOT_TOKEN": self.tg_token.text().strip(),  # type: ignore[union-attr]
             "TELEGRAM_CHAT_ID": self.tg_chat_id.text().strip(),
-            "OBSERVABILITY_BACKEND": "logfire" if self._logfire_check.isChecked() else "stdio",
+            "OBSERVABILITY_BACKEND": ("logfire" if self._logfire_check.isChecked() else "stdio"),
             "LOGFIRE_TOKEN": self.logfire_token.text().strip(),  # type: ignore[union-attr]
             "AFIP_WSFE_PUNTO_DE_VENTA": self.wsfe_punto_de_venta.text().strip(),  # type: ignore[attr-defined]
             "AFIP_WSFE_TIPO_FACTURA": self.wsfe_tipo_factura.text().strip(),  # type: ignore[attr-defined]
@@ -351,9 +470,105 @@ class ConfigTab(QWidget):
             "AFIP_WSFE_INVOICE_TYPE_LABEL": self.wsfe_invoice_type_label.text().strip(),  # type: ignore[attr-defined]
             "AFIP_WSFE_CONCEPT_LABEL": self.wsfe_concept_label.text().strip(),  # type: ignore[attr-defined]
             "AFIP_WSFE_RECEIVER_LABEL": self.wsfe_receiver_label.text().strip(),  # type: ignore[attr-defined]
+            "DATABASE_BACKEND": self._database_backend,
+            "DATABASE_PATH": "",
+            "DATABASE_URL": self.database_url.text().strip(),  # type: ignore[union-attr]
         }
-        save_config(data)
+
+    def _save(self) -> None:
+        save_config(self._collect_form_data())
         self._save_status.setText("✓  Guardado")
         self._save_status.setStyleSheet("font-size:12px; color:#1D9E75;")
         self.config_saved.emit()
 
+    def _test_database(self) -> None:
+        if self._db_test_worker and self._db_test_worker.isRunning():
+            return
+
+        self._db_test_status.setText("Probando conexión…")
+        self._db_test_status.setStyleSheet("font-size:12px; color:#888;")
+        self._test_db_btn.setEnabled(False)
+
+        self._db_test_worker = DatabaseTestWorker(
+            backend=self._database_backend,
+            database_url=self.database_url.text().strip(),  # type: ignore[union-attr]
+        )
+        self._db_test_worker.ok.connect(self._on_db_test_ok)  # type: ignore[arg-type]
+        self._db_test_worker.failed.connect(self._on_db_test_failed)  # type: ignore[arg-type]
+        self._db_test_worker.finished.connect(self._on_db_test_finished)  # type: ignore[arg-type]
+        self._db_test_worker.start()
+
+    def _on_db_test_ok(self) -> None:
+        self._db_test_status.setText("✓  Conexión exitosa")
+        self._db_test_status.setStyleSheet("font-size:12px; color:#1D9E75;")
+
+    def _on_db_test_failed(self, message: str) -> None:
+        self._db_test_status.setText(f"✗  {message}")
+        self._db_test_status.setStyleSheet("font-size:12px; color:#D85A30;")
+
+    def _on_db_test_finished(self) -> None:
+        if self._database_backend == "postgres":
+            self._test_db_btn.setEnabled(True)
+
+    def _export_config(self) -> None:
+        confirmed = QMessageBox.warning(
+            self,
+            "Exportar configuración",
+            "El archivo exportado contendrá credenciales y certificados. "
+            "Guardalo en un lugar seguro.",
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if confirmed != QMessageBox.StandardButton.Ok:
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exportar configuración",
+            "facturador.facturador.json",
+            "Configuración Facturador (*.facturador.json);;JSON (*.json)",
+        )
+        if not path:
+            return
+
+        try:
+            payload = export_config_json(include_certificates=True)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+            self._save_status.setText("✓  Configuración exportada")
+            self._save_status.setStyleSheet("font-size:12px; color:#1D9E75;")
+        except OSError as exc:
+            QMessageBox.critical(self, "Error", f"No se pudo exportar: {exc}")
+
+    def _import_config(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Importar configuración",
+            "",
+            "Configuración Facturador (*.facturador.json);;JSON (*.json)",
+        )
+        if not path:
+            return
+
+        confirmed = QMessageBox.question(
+            self,
+            "Importar configuración",
+            "Se reemplazarán los valores actuales. "
+            "Los campos vacíos en el archivo conservarán el valor actual.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirmed != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            with open(path, encoding="utf-8") as handle:
+                import_config_json(handle.read())
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(self, "Error", f"No se pudo importar: {exc}")
+            return
+
+        self._load()
+        self._save_status.setText("✓  Configuración importada")
+        self._save_status.setStyleSheet("font-size:12px; color:#1D9E75;")
+        self.config_saved.emit()

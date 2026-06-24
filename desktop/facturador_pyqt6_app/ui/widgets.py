@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class SecretLineEdit(QWidget):
@@ -119,7 +127,9 @@ def make_section_header(title: str, desc: str = "") -> QWidget:
 class AlertBanner(QLabel):
     """Banner for warnings/success."""
 
-    def __init__(self, text: str = "", kind: str = "warning", parent: QWidget | None = None) -> None:
+    def __init__(
+        self, text: str = "", kind: str = "warning", parent: QWidget | None = None
+    ) -> None:
         super().__init__(text, parent)
         self.setWordWrap(True)
         self.setKind(kind)
@@ -154,4 +164,3 @@ def make_stat_card(label: str, value: str, color: str = "default") -> tuple[QWid
     layout.addWidget(lbl)
     layout.addWidget(num)
     return card, num
-

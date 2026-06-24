@@ -10,7 +10,9 @@ from src.providers.afip.afip_electronic_billing import AfipElectronicBillingProv
 from src.providers.afip.models import AfipCredentials
 
 
-def test_validate_configuration_raises_on_errors(caplog: pytest.LogCaptureFixture) -> None:
+def test_validate_configuration_raises_on_errors(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     fake_auth = SimpleNamespace()
     fake_auth.cuit = 20424572951
     fake_auth.get_credentials = lambda: AfipCredentials(
@@ -74,4 +76,3 @@ def test_validate_configuration_logs_events_as_warning(
         assert errors == []
         assert events and "39" in events[0]
         assert any("AFIP validation event" in rec.message for rec in caplog.records)
-

@@ -7,8 +7,23 @@ wheels/
 *.egg-info
 certs/
 .env
+*.local.env
+config.local.env
 # Virtual environments
 .venv
 *.pem
 payments.db
 logs/
+
+# macOS / editor
+.DS_Store
+**/.DS_Store
+
+# Desktop app user exports (tokens + AFIP certs)
+*.facturador.json
+
+# PyInstaller
+*.spec.bak
+
+# Logfire local credentials (see .logfire/.gitignore)
+.logfire/

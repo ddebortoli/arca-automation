@@ -45,10 +45,7 @@ class InvoicePreview(BaseModel):
 
     @property
     def formatted_voucher(self) -> str:
-        return (
-            f"{self.invoice_type} "
-            f"{self.point_of_sale:05d}-{self.next_invoice_number:08d}"
-        )
+        return f"{self.invoice_type} " f"{self.point_of_sale:05d}-{self.next_invoice_number:08d}"
 
 
 PaymentStatus = Literal[

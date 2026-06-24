@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import os
-import sqlite3
-import subprocess
-from pathlib import Path
+from logging import Handler, LogRecord
 
 from PyQt6.QtCore import QDateTime, QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QColor, QTextCharFormat, QTextCursor
@@ -19,36 +18,9 @@ from PyQt6.QtWidgets import (
 )
 
 from core.config import ENV_FILE, get_certs_status, load_config
+from src.bootstrap import build_repository
+from src.pipeline import run_payment_pipeline_safe, start_telegram_bot_thread
 from ui.widgets import CardWidget, make_section_header, make_stat_card
-
-
-def _repo_root() -> Path:
-    """Compute repository root from this file location."""
-    # .../desktop/facturador_pyqt6_app/ui/tab_run.py -> parents[3] is repo root.
-    return Path(__file__).resolve().parents[3]
-
-
-def _count_payment_statuses(db_path: Path) -> tuple[int, int, int]:
-    """Return (total, billed, pending) from sqlite payments table."""
-    if not db_path.exists():
-        return 0, 0, 0
-
-    conn = sqlite3.connect(str(db_path))
-    try:
-        cur = conn.cursor()
-        total = int(cur.execute("SELECT COUNT(*) FROM payments").fetchone()[0])
-        billed = int(cur.execute("SELECT COUNT(*) FROM payments WHERE status='issued'").fetchone()[0])
-        pending = int(
-            cur.execute(
-                """
-                SELECT COUNT(*) FROM payments
-                WHERE status IN ('fetched', 'pending_approval')
-                """
-            ).fetchone()[0]
-        )
-        return total, billed, pending
-    finally:
-        conn.close()
 
 
 def _classify_level(line: str) -> str:
@@ -58,13 +30,39 @@ def _classify_level(line: str) -> str:
         return "err"
     if "warn" in lowered or "warning" in lowered:
         return "warn"
-    if lowered.startswith("✓") or "ok" in lowered:
+    if lowered.startswith("✓") or " ok" in lowered:
         return "ok"
     return ""
 
 
+class _QtLogHandler(Handler):
+    """Forward logging records to a Qt signal."""
+
+    preserve_on_reconfigure = True
+
+    def __init__(self, emit_line) -> None:
+        super().__init__()
+        self._emit_line = emit_line
+        self.setFormatter(logging.Formatter("%(asctime)s %(levelname)-8s %(name)s — %(message)s"))
+        self.setLevel(logging.INFO)
+
+    def emit(self, record: LogRecord) -> None:
+        message = self.format(record)
+        if not message:
+            return
+
+        level = record.levelname.lower()
+        if level in {"error", "critical"}:
+            style = "err"
+        elif level == "warning":
+            style = "warn"
+        else:
+            style = "raw"
+        self._emit_line(message, style)
+
+
 class RunnerWorker(QThread):
-    """Run `uv run main.py` (and telegram bot if needed)."""
+    """Run the payment pipeline in-process."""
 
     log_line = pyqtSignal(str, str)  # message, level
     stats_ready = pyqtSignal(int, int, int)
@@ -75,51 +73,47 @@ class RunnerWorker(QThread):
         cfg = load_config()
         approval_mode = cfg.get("APPROVAL_MODE", "auto")
 
-        env = os.environ.copy()
-        env["ARC_ENV_FILE"] = str(ENV_FILE)
+        os.environ["ARC_ENV_FILE"] = str(ENV_FILE)
 
-        root = _repo_root()
-        main_cmd = ["uv", "run", "main.py"]
+        handler = _QtLogHandler(self.log_line.emit)
+        root = logging.getLogger()
+        for existing in list(root.handlers):
+            if isinstance(existing, _QtLogHandler):
+                root.removeHandler(existing)
+        root.addHandler(handler)
+        for logger_name in ("httpx", "src"):
+            logging.getLogger(logger_name).setLevel(logging.INFO)
+        bot_thread = None
 
-        bot_proc: subprocess.Popen[str] | None = None
         try:
             if approval_mode == "telegram":
-                bot_cmd = ["uv", "run", "telegram_bot.py"]
-                bot_proc = subprocess.Popen(
-                    bot_cmd,
-                    cwd=str(root),
-                    env=env,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                )
-                self.log_line.emit("Iniciando Telegram bot…", "")
+                bot_result = start_telegram_bot_thread()
+                bot_thread = bot_result.thread
+                if bot_result.reused_existing:
+                    self.log_line.emit(
+                        "Bot de Telegram ya activo — reutilizando conexión.",
+                        "ok",
+                    )
+                else:
+                    self.log_line.emit("Iniciando Telegram bot…", "ok")
 
-            proc = subprocess.Popen(
-                main_cmd,
-                cwd=str(root),
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
-
-            assert proc.stdout is not None
-            for line in proc.stdout:
-                line = line.rstrip("\n")
-                if line:
-                    self.log_line.emit(line, _classify_level(line))
-
-            proc.wait()
+            run_payment_pipeline_safe()
         except Exception as exc:  # noqa: BLE001
             self.log_line.emit(f"Error ejecutando: {exc}", "err")
         finally:
-            # Keep bot running if it was started; user can close the app.
-            payments_db = root / "payments.db"
-            total, billed, pending = _count_payment_statuses(payments_db)
+            if bot_thread is None or not bot_thread.is_alive():
+                root.removeHandler(handler)
+            try:
+                repository = build_repository()
+                total, billed, pending = repository.count_payment_stats()
+            except Exception:  # noqa: BLE001
+                total, billed, pending = 0, 0, 0
             self.stats_ready.emit(total, billed, pending)
+            if bot_thread is not None and bot_thread.is_alive():
+                self.log_line.emit(
+                    "Telegram bot sigue activo en segundo plano.",
+                    "",
+                )
             self.finished.emit()
 
 
@@ -159,11 +153,9 @@ class RunTab(QWidget):
 
         self._stat_total_card, self._stat_total = make_stat_card("Movimientos", "—")
         self._stat_billed_card, self._stat_billed = make_stat_card("Ya facturados", "—", "green")
-        #self._stat_pending_card, self._stat_pending = make_stat_card("Pendientes", "—", "amber")
 
         stats_row.addWidget(self._stat_total_card)
         stats_row.addWidget(self._stat_billed_card)
-        #stats_row.addWidget(self._stat_pending_card)
         layout.addLayout(stats_row)
 
         log_card = CardWidget()
@@ -206,6 +198,8 @@ class RunTab(QWidget):
             missing.append("clave privada")
         if not certs["cert"]:
             missing.append("certificado de AFIP")
+        if cfg.get("DATABASE_BACKEND", "sqlite") == "postgres" and not cfg.get("DATABASE_URL"):
+            missing.append("connection string de PostgreSQL")
 
         if missing:
             self._run_btn.setEnabled(False)
@@ -244,13 +238,17 @@ class RunTab(QWidget):
         self._run_btn.setText("▶  Ejecutar ahora")
 
     def _append_log(self, message: str, level: str) -> None:
-        ts = QDateTime.currentDateTime().toString("hh:mm:ss")
-        line = f"[{ts}]  {message}"
+        if level == "raw":
+            line = message
+        else:
+            ts = QDateTime.currentDateTime().toString("hh:mm:ss")
+            line = f"[{ts}]  {message}"
 
         colors = {
             "ok": "#1D9E75",
             "warn": "#BA7517",
             "err": "#D85A30",
+            "raw": "#555555",
             "": "#555555",
         }
         color = colors.get(level, "#555555")
@@ -267,7 +265,6 @@ class RunTab(QWidget):
     def _update_stats(self, total: int, billed: int, pending: int) -> None:
         self._stat_total.setText(str(total))
         self._stat_billed.setText(str(billed))
-        #self._stat_pending.setText(str(pending))
 
     def _clear_log(self) -> None:
         self._log.clear()
@@ -275,4 +272,3 @@ class RunTab(QWidget):
     def refresh(self) -> None:
         """Re-check readiness after config/certs changes."""
         self._check_readiness()
-

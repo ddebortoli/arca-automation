@@ -96,9 +96,7 @@ def test_sentry_backend_calls_init() -> None:
         {
             "sentry_sdk": mock_sentry,
             "sentry_sdk.integrations": MagicMock(),
-            "sentry_sdk.integrations.logging": MagicMock(
-                LoggingIntegration=mock_integration
-            ),
+            "sentry_sdk.integrations.logging": MagicMock(LoggingIntegration=mock_integration),
         },
     ):
         backend = build_observability_backend(config)
@@ -112,7 +110,7 @@ def test_sentry_backend_calls_init() -> None:
 
 def test_redact_telegram_bot_token_redacts_any_endpoint() -> None:
     message = (
-        'HTTP Request: POST https://api.telegram.org/bot123456:abcDEF/sendMessage '
+        "HTTP Request: POST https://api.telegram.org/bot123456:abcDEF/sendMessage "
         '"HTTP/1.1 200 OK"'
     )
     redacted = _redact_telegram_bot_token(message)
@@ -127,7 +125,7 @@ def test_telegram_api_filter_redacts_and_keeps_non_polling_logs() -> None:
         pathname=__file__,
         lineno=1,
         msg=(
-            'HTTP Request: POST https://api.telegram.org/bot123456:abcDEF/sendMessage '
+            "HTTP Request: POST https://api.telegram.org/bot123456:abcDEF/sendMessage "
             '"HTTP/1.1 200 OK"'
         ),
         args=(),
@@ -147,7 +145,7 @@ def test_telegram_api_filter_drops_successful_get_updates() -> None:
         pathname=__file__,
         lineno=1,
         msg=(
-            'HTTP Request: GET https://api.telegram.org/bot123456:abcDEF/getUpdates '
+            "HTTP Request: GET https://api.telegram.org/bot123456:abcDEF/getUpdates "
             '"HTTP/1.1 200 OK"'
         ),
         args=(),

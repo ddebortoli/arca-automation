@@ -21,9 +21,7 @@ class SentryObservabilityBackend:
             import sentry_sdk
             from sentry_sdk.integrations.logging import LoggingIntegration
         except ImportError as exc:
-            raise ImportError(
-                "sentry-sdk is not installed. Run: uv sync --extra sentry"
-            ) from exc
+            raise ImportError("sentry-sdk is not installed. Run: uv sync --extra sentry") from exc
 
         level = _LEVEL_MAP[self._config.log_level]
         sentry_sdk.init(

@@ -20,6 +20,7 @@ from ui.styles import build_stylesheet
 from ui.tab_certs import CertsTab
 from ui.tab_config import ConfigTab
 from ui.tab_run import RunTab
+from core.about import CREDIT_HTML
 from core.config import get_certs_status, load_config, save_config
 from src.bootstrap import build_afip_provider
 from src.domain.exceptions import AfipValidationError
@@ -175,6 +176,19 @@ class MainWindow(QMainWindow):
         self._update_theme_btn_label()
         theme_layout.addWidget(self._theme_btn)
         sidebar_layout.addWidget(theme_widget)
+
+        # Author credit
+        credit_widget = QWidget()
+        credit_layout = QVBoxLayout(credit_widget)
+        credit_layout.setContentsMargins(16, 4, 16, 4)
+        credit_label = QLabel(CREDIT_HTML)
+        credit_label.setObjectName("credit_label")
+        credit_label.setOpenExternalLinks(True)
+        credit_label.setWordWrap(True)
+        credit_label.setTextFormat(Qt.TextFormat.RichText)
+        credit_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        credit_layout.addWidget(credit_label)
+        sidebar_layout.addWidget(credit_widget)
 
         # Status dot
         status_widget = QWidget()
@@ -335,4 +349,3 @@ class MainWindow(QMainWindow):
         self._dot_label.setStyleSheet("font-size: 12px; color: #BA7517;")
         self._status_label.setText(f"No listo para emitir: {reason}")
         self._status_label.setStyleSheet("font-size: 12px; color: #BA7517;")
-

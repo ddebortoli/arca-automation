@@ -12,10 +12,17 @@ from src.bootstrap import load_runtime_config
 
 
 def _dummy_auth(cuit: int) -> object:
-    return SimpleNamespace(cuit=cuit, get_credentials=lambda: AfipCredentials(token="t", sign="s", expiration=datetime.now()+timedelta(hours=1)))
+    return SimpleNamespace(
+        cuit=cuit,
+        get_credentials=lambda: AfipCredentials(
+            token="t", sign="s", expiration=datetime.now() + timedelta(hours=1)
+        ),
+    )
 
 
-def test_wsfe_settings_env_overrides_are_used_in_preview(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wsfe_settings_env_overrides_are_used_in_preview(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("AFIP_WSFE_PUNTO_DE_VENTA", "7")
     monkeypatch.setenv("AFIP_WSFE_TIPO_FACTURA", "11")
     monkeypatch.setenv("AFIP_WSFE_CONCEPTO", "2")
@@ -51,7 +58,9 @@ def test_wsfe_settings_env_overrides_are_used_in_preview(monkeypatch: pytest.Mon
         assert preview.receiver == "Consumidor Final"
 
 
-def test_wsfe_settings_loaded_from_desktop_env_via_arc_env_file(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wsfe_settings_loaded_from_desktop_env_via_arc_env_file(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     home_dir = tmp_path / "home"
     home_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("HOME", str(home_dir))

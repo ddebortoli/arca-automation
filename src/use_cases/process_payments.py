@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 from ..domain.exceptions import AfipInvoiceError, AfipValidationError, ApprovalError
 from ..domain.models import MercadoPagoPayment
 from ..domain.ports import AfipPort, ApprovalPort, MercadoPagoPort
-from ..repositories.payment_repository import PaymentRepository
+from ..domain.ports import PaymentRepositoryPort
 from .issue_invoice import IssueInvoiceUseCase
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ class ProcessPaymentsUseCase:
         mp_provider: MercadoPagoPort,
         afip_provider: AfipPort,
         approval_provider: ApprovalPort,
-        repository: PaymentRepository,
+        repository: PaymentRepositoryPort,
     ) -> None:
         self._mp = mp_provider
         self._afip = afip_provider

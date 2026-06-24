@@ -20,9 +20,7 @@ class LogfireObservabilityBackend:
         try:
             import logfire
         except ImportError as exc:
-            raise ImportError(
-                "logfire is not installed. Run: uv sync --extra logfire"
-            ) from exc
+            raise ImportError("logfire is not installed. Run: uv sync --extra logfire") from exc
 
         logfire.configure(
             token=self._config.logfire_token,

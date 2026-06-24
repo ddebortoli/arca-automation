@@ -2,7 +2,13 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Protocol
 
-from .models import InvoicePreview, IssuedInvoice, MercadoPagoPayment
+from .models import (
+    InvoicePreview,
+    IssuedInvoice,
+    MercadoPagoPayment,
+    PaymentRecord,
+    PaymentStatus,
+)
 
 
 class MercadoPagoPort(Protocol):
@@ -43,6 +49,54 @@ class AfipPort(Protocol):
         Raises:
             AfipInvoiceError: If AFIP rejects or fails to process the request.
         """
+        ...
+
+
+class PaymentRepositoryPort(Protocol):
+    """Contract for persisting MercadoPago payment processing state."""
+
+    def filter_new_payments(self, payments: list[MercadoPagoPayment]) -> list[MercadoPagoPayment]:
+        """Return payments whose IDs are not yet present in the database."""
+        ...
+
+    def list_fetched(self) -> list[MercadoPagoPayment]:
+        """Return payments awaiting approval submission or auto-invoicing."""
+        ...
+
+    def get_payment(self, mp_payment_id: int) -> PaymentRecord | None:
+        """Return a payment by MercadoPago ID, if it exists."""
+        ...
+
+    def insert_fetched(self, payments: list[MercadoPagoPayment]) -> None:
+        """Persist payments with status ``fetched``."""
+        ...
+
+    def mark_pending_approval(self, mp_payment_id: int) -> None:
+        """Transition payment to ``pending_approval``."""
+        ...
+
+    def mark_fetched(self, mp_payment_id: int) -> None:
+        """Return payment to ``fetched`` for a future approval cycle."""
+        ...
+
+    def mark_issued(self, mp_payment_id: int, invoice: IssuedInvoice) -> None:
+        """Transition payment to ``issued`` and store the resulting CAE."""
+        ...
+
+    def mark_failed(self, mp_payment_id: int, error: str) -> None:
+        """Transition payment to ``failed`` and store the error description."""
+        ...
+
+    def mark_postponed(self, mp_payment_id: int, error: str) -> None:
+        """Transition payment to ``fetched`` and store an error for retry."""
+        ...
+
+    def mark_rejected(self, mp_payment_id: int, reason: str = "Rechazado por usuario") -> None:
+        """Transition payment to ``rejected`` (terminal, no retries)."""
+        ...
+
+    def count_payment_stats(self) -> tuple[int, int, int]:
+        """Return ``(total, billed, pending)`` payment counts."""
         ...
 
 

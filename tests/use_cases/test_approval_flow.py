@@ -7,7 +7,7 @@ import pytest
 
 from src.domain.exceptions import InvalidPaymentStateError, PaymentNotFoundError
 from src.domain.models import InvoicePreview, IssuedInvoice, MercadoPagoPayment
-from src.repositories.payment_repository import PaymentRepository
+from src.repositories.sqlite_payment_repository import SqlitePaymentRepository
 from src.use_cases.issue_invoice import IssueInvoiceUseCase
 from src.use_cases.process_payments import ProcessPaymentsUseCase
 from src.use_cases.postpone_payment import PostponePaymentUseCase
@@ -39,8 +39,8 @@ def _preview(payment_id: int) -> InvoicePreview:
 
 
 @pytest.fixture
-def repository(tmp_path) -> PaymentRepository:
-    return PaymentRepository(tmp_path / "payments.db")
+def repository(tmp_path) -> SqlitePaymentRepository:
+    return SqlitePaymentRepository(tmp_path / "payments.db")
 
 
 @pytest.fixture
@@ -56,7 +56,7 @@ def afip_provider() -> MagicMock:
 
 
 def test_process_payments_auto_mode_issues_fetched(
-    repository: PaymentRepository,
+    repository: SqlitePaymentRepository,
     afip_provider: MagicMock,
 ) -> None:
     approval = MagicMock()
@@ -75,7 +75,7 @@ def test_process_payments_auto_mode_issues_fetched(
 
 
 def test_process_payments_telegram_mode_marks_pending(
-    repository: PaymentRepository,
+    repository: SqlitePaymentRepository,
     afip_provider: MagicMock,
 ) -> None:
     approval = MagicMock()
@@ -94,7 +94,9 @@ def test_process_payments_telegram_mode_marks_pending(
     approval.submit_for_approval.assert_called_once()
 
 
-def test_issue_invoice_from_approval(repository: PaymentRepository, afip_provider: MagicMock) -> None:
+def test_issue_invoice_from_approval(
+    repository: SqlitePaymentRepository, afip_provider: MagicMock
+) -> None:
     repository.insert_fetched([_payment(3)])
     repository.mark_pending_approval(3)
 
@@ -107,7 +109,7 @@ def test_issue_invoice_from_approval(repository: PaymentRepository, afip_provide
 
 
 def test_issue_invoice_rejects_wrong_status(
-    repository: PaymentRepository,
+    repository: SqlitePaymentRepository,
     afip_provider: MagicMock,
 ) -> None:
     repository.insert_fetched([_payment(4)])
@@ -116,7 +118,7 @@ def test_issue_invoice_rejects_wrong_status(
         IssueInvoiceUseCase(afip_provider, repository).execute(4, from_approval=True)
 
 
-def test_reject_payment_is_terminal(repository: PaymentRepository) -> None:
+def test_reject_payment_is_terminal(repository: SqlitePaymentRepository) -> None:
     repository.insert_fetched([_payment(5)])
     repository.mark_pending_approval(5)
 
@@ -127,12 +129,14 @@ def test_reject_payment_is_terminal(repository: PaymentRepository) -> None:
     assert payment.status == "rejected"
 
 
-def test_reject_payment_not_found(repository: PaymentRepository) -> None:
+def test_reject_payment_not_found(repository: SqlitePaymentRepository) -> None:
     with pytest.raises(PaymentNotFoundError):
         RejectPaymentUseCase(repository).execute(999)
 
 
-def test_postpone_payment_returns_to_fetched(repository: PaymentRepository) -> None:
+def test_postpone_payment_returns_to_fetched(
+    repository: SqlitePaymentRepository,
+) -> None:
     repository.insert_fetched([_payment(6)])
     repository.mark_pending_approval(6)
 
@@ -145,7 +149,7 @@ def test_postpone_payment_returns_to_fetched(repository: PaymentRepository) -> N
 
 
 def test_postpone_then_resubmit_on_next_sync(
-    repository: PaymentRepository,
+    repository: SqlitePaymentRepository,
     afip_provider: MagicMock,
 ) -> None:
     approval = MagicMock()

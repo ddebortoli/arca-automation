@@ -1,9 +1,13 @@
 import logging
 
-from ..domain.exceptions import AfipInvoiceError, InvalidPaymentStateError, PaymentNotFoundError
+from ..domain.exceptions import (
+    AfipInvoiceError,
+    InvalidPaymentStateError,
+    PaymentNotFoundError,
+)
 from ..domain.models import IssuedInvoice, PaymentStatus
 from ..domain.ports import AfipPort
-from ..repositories.payment_repository import PaymentRepository
+from ..domain.ports import PaymentRepositoryPort
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +23,7 @@ class IssueInvoiceUseCase:
     def __init__(
         self,
         afip_provider: AfipPort,
-        repository: PaymentRepository,
+        repository: PaymentRepositoryPort,
     ) -> None:
         self._afip = afip_provider
         self._repo = repository

@@ -9,6 +9,8 @@ from ..domain.models import IssuedInvoice
 from .afip.wsfe_settings import load_wsfe_settings
 
 logger = logging.getLogger(__name__)
+
+
 class AfipElectronicBillingProvider:
     """Issues Factura C invoices through the AFIP WSFE service.
 
@@ -17,13 +19,15 @@ class AfipElectronicBillingProvider:
     """
 
     def __init__(self, access_token: str, cuit: int, cert: str, key: str) -> None:
-        client = Afip({
-            "access_token": access_token,
-            "CUIT": cuit,
-            "production": True,
-            "cert": cert,
-            "key": key,
-        })
+        client = Afip(
+            {
+                "access_token": access_token,
+                "CUIT": cuit,
+                "production": True,
+                "cert": cert,
+                "key": key,
+            }
+        )
         self._billing = client.ElectronicBilling
 
     def issue_invoice(self, amount: Decimal, date: datetime) -> IssuedInvoice:
@@ -71,9 +75,7 @@ class AfipElectronicBillingProvider:
         try:
             res = self._billing.createVoucher(data)
         except Exception as exc:
-            raise AfipInvoiceError(
-                f"AFIP rejected voucher for amount {amount}: {exc}"
-            ) from exc
+            raise AfipInvoiceError(f"AFIP rejected voucher for amount {amount}: {exc}") from exc
 
         logger.debug("AFIP voucher created: CAE=%s number=%d", res["CAE"], invoice_number)
         return IssuedInvoice(

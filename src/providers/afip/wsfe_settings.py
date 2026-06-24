@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-
 _DEFAULT_PUNTO_DE_VENTA = 2
 _DEFAULT_TIPO_FACTURA = 11  # Factura C
 _DEFAULT_CONCEPTO = 2  # Servicios
@@ -65,4 +64,3 @@ def load_wsfe_settings() -> WsfeSettings:
         concept_label=_get_str_env("AFIP_WSFE_CONCEPT_LABEL", _DEFAULT_CONCEPT_LABEL),
         receiver_label=_get_str_env("AFIP_WSFE_RECEIVER_LABEL", _DEFAULT_RECEIVER_LABEL),
     )
-

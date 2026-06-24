@@ -40,4 +40,3 @@ def generate_key_and_csr(cuit: str, output_dir: Path) -> tuple[Path, Path]:
         raise RuntimeError(f"OpenSSL CSR generation failed: {result.stderr}")
 
     return key_path, csr_path
-

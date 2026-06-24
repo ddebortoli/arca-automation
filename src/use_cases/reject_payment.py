@@ -1,7 +1,7 @@
 import logging
 
 from ..domain.exceptions import InvalidPaymentStateError, PaymentNotFoundError
-from ..repositories.payment_repository import PaymentRepository
+from ..domain.ports import PaymentRepositoryPort
 
 logger = logging.getLogger(__name__)
 
@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class RejectPaymentUseCase:
     """Mark a pending payment as permanently rejected."""
 
-    def __init__(self, repository: PaymentRepository) -> None:
+    def __init__(self, repository: PaymentRepositoryPort) -> None:
         self._repo = repository
 
     def execute(self, payment_id: int, reason: str = "Rechazado por usuario") -> None:
